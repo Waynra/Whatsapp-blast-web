@@ -1,0 +1,41 @@
+{
+  "name": "whatsapp-blast-cli",
+  "version": "2.0.0",
+  "description": "Modern WhatsApp Blast CLI with advanced features",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "cli": "node index.js",
+    "dev": "nodemon index.js",
+    "server": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "setup": "node setup.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "blast",
+    "cli",
+    "automation"
+  ],
+  "author": "Waynra",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "cli-progress": "^3.12.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "qrcode-terminal": "^0.12.0",
+    "readline-sync": "^1.4.10",
+    "socket.io": "^4.8.3",
+    "whatsapp-web.js": "^1.23.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

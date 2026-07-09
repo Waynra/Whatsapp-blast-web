@@ -230,7 +230,7 @@ dist
 
 # Gatsby files
 .cache/
-public
+# public
 
 # Serverless directories
 .serverless/

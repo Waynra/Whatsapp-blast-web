@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Blast Web Dashboard</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- SIDEBAR -->
+    <aside class="app-sidebar">
+      <div class="sidebar-brand">
+        <i class="fa-brands fa-whatsapp logo-icon"></i>
+        <span>WA Blast Web</span>
+      </div>
+
+      <!-- Connection Card -->
+      <div class="connection-card" id="connectionCard">
+        <div class="card-title">Koneksi WhatsApp</div>
+        <div class="status-indicator-wrapper">
+          <span class="status-dot dot-disconnected" id="statusDot"></span>
+          <span class="status-text" id="statusText">Memeriksa status...</span>
+        </div>
+        <div class="client-info" id="clientInfo" style="display: none;">
+          <p class="client-name"><i class="fa-solid fa-user"></i> <span id="clientName">Name</span></p>
+          <p class="client-phone"><i class="fa-solid fa-phone"></i> <span id="clientPhone">628xxx</span></p>
+          <button class="btn btn-danger btn-sm" id="btnDisconnect" style="margin-top: 10px;">
+            <i class="fa-solid fa-sign-out-alt"></i> Disconnect
+          </button>
+        </div>
+      </div>
+
+      <!-- Templates List -->
+      <div class="sidebar-menu-section">
+        <h3><i class="fa-solid fa-file-lines"></i> Templates (.txt)</h3>
+        <ul class="template-list" id="templateList">
+          <li class="loading-item">Loading templates...</li>
+        </ul>
+      </div>
+
+      <!-- Reports List -->
+      <div class="sidebar-menu-section">
+        <h3><i class="fa-solid fa-chart-simple"></i> Reports (.txt)</h3>
+        <ul class="report-list" id="reportList">
+          <li class="loading-item">Loading reports...</li>
+        </ul>
+      </div>
+
+      <!-- Blacklist List -->
+      <div class="sidebar-menu-section">
+        <h3><i class="fa-solid fa-user-slash"></i> Blacklist / Opt-Out</h3>
+        
+        <!-- Add Blacklist Form -->
+        <div class="blacklist-add-form">
+          <input type="text" id="blacklistInput" placeholder="Tambah nomor (628...)" />
+          <button id="btnBlacklistAdd" class="btn-icon" title="Tambah Blacklist">
+            <i class="fa-solid fa-plus"></i>
+          </button>
+        </div>
+
+        <ul class="blacklist-list" id="blacklistList">
+          <li class="loading-item">Loading blacklist...</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="app-main">
+      
+      <!-- HEADER -->
+      <header class="app-header">
+        <h1>Dashboard Konsol</h1>
+        <div class="header-actions">
+          <button class="theme-toggle-btn" id="themeToggleBtn" title="Ganti Tema" type="button">
+            <i class="fa-solid fa-sun" id="themeToggleIcon"></i>
+          </button>
+          <div class="status-badge" id="headerStatusBadge">
+            <i class="fa-solid fa-circle-nodes"></i> Offline
+          </div>
+        </div>
+      </header>
+
+      <!-- AUTH / QR CONTAINER -->
+      <section class="auth-section" id="authSection" style="display: none;">
+        <div class="glass-card auth-card">
+          <div class="auth-header">
+            <h2>Hubungkan WhatsApp Anda</h2>
+            <p>Scan QR code di bawah menggunakan aplikasi WhatsApp Anda (Perangkat Tertaut / Linked Devices)</p>
+          </div>
+          <div class="qr-container-wrapper">
+            <div id="qrPlaceholder" class="qr-placeholder">
+              <i class="fa-solid fa-spinner fa-spin spinner-icon"></i>
+              <p>Menunggu QR Code dari server...</p>
+            </div>
+            <div id="qrcode"></div>
+          </div>
+          <div class="instructions">
+            <div class="step"><span class="step-num">1</span> Buka WhatsApp di HP Anda</div>
+            <div class="step"><span class="step-num">2</span> Ketuk Menu/Settings > Perangkat Tertaut / Linked Devices</div>
+            <div class="step"><span class="step-num">3</span> Ketuk Tautkan Perangkat / Link a Device dan arahkan kamera ke layar</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CAMPAIGN CONTAINER -->
+      <section class="campaign-section" id="campaignSection">
+        
+        <!-- GRID LAYOUT -->
+        <div class="campaign-grid">
+          
+          <!-- Column 1: Form Inputs -->
+          <div class="glass-card flex-column">
+            <h2><i class="fa-solid fa-pen-nib"></i> Konfigurasi Pesan</h2>
+            
+            <div class="form-group">
+              <label for="messageTemplate">Template Pesan</label>
+              <textarea id="messageTemplate" placeholder="Tulis pesan Anda disini...
+Gunakan {name} untuk personalisasi nama.
+Gunakan spintax: {Halo|Hai|Hi} untuk variasi kata.
+Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
+            </div>
+
+            <!-- TABS FOR CONTACT SELECTION -->
+            <div class="contacts-tab-wrapper">
+              <div class="tabs-navigation">
+                <button class="tab-btn active" id="tabUploadFile" type="button">
+                  <i class="fa-solid fa-file-arrow-up"></i> Upload File
+                </button>
+                <button class="tab-btn" id="tabSelectWA" type="button">
+                  <i class="fa-solid fa-comments"></i> Pilih dari WhatsApp
+                </button>
+                <button class="tab-btn" id="tabInputManual" type="button">
+                  <i class="fa-solid fa-keyboard"></i> Input Manual
+                </button>
+              </div>
+
+              <!-- Tab Content 1: Upload File -->
+              <div class="tab-content" id="contentUploadFile">
+                <div class="form-group" style="margin-top: 15px;">
+                  <label>Upload File Kontak</label>
+                  <div class="file-drop-zone" id="fileDropZone">
+                    <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                    <p>Drag & drop file <code>.txt</code> kontak Anda disini atau klik untuk mencari</p>
+                    <input type="file" id="contactsFileInput" accept=".txt" style="display: none;">
+                  </div>
+                  <div id="uploadFeedback" class="upload-feedback" style="display: none;">
+                    <i class="fa-solid fa-circle-check text-success"></i> File <strong id="uploadedFileName">kontak.txt</strong> berhasil diupload (<span id="contactsCount">0</span> nomor terdeteksi).
+                  </div>
+                </div>
+
+                <!-- Contacts Preview -->
+                <div class="form-group" id="contactsPreviewGroup" style="display: none;">
+                  <label>Preview Kontak yang Diupload</label>
+                  <div class="contacts-preview-box" id="contactsPreviewBox"></div>
+                </div>
+              </div>
+
+              <!-- Tab Content 2: Select from WhatsApp -->
+              <div class="tab-content" id="contentSelectWA" style="display: none; margin-top: 15px;">
+                <div class="wa-selection-controls">
+                  <button class="btn btn-info btn-sm" id="btnLoadWAData" type="button">
+                    <i class="fa-solid fa-arrows-rotate" id="loadWAIcon"></i> Muat Chat Aktif
+                  </button>
+                  
+                  <div class="wa-filter-search">
+                    <input type="text" id="waChatSearch" placeholder="Cari nama atau nomor...">
+                  </div>
+
+                  <div class="filter-pills">
+                    <button class="filter-pill active" id="filterAll" type="button">Semua</button>
+                    <button class="filter-pill" id="filterPrivate" type="button">Pribadi</button>
+                    <button class="filter-pill" id="filterGroups" type="button">Grup</button>
+                  </div>
+                </div>
+
+                <!-- Chats List checklist -->
+                <div class="wa-chats-checklist-wrapper">
+                  <div class="select-all-row">
+                    <label class="checkbox-container">
+                      <input type="checkbox" id="chkSelectAllChats">
+                      <span class="checkmark"></span>
+                      <strong>Pilih Semua (<span id="visibleChatsCount">0</span>)</strong>
+                    </label>
+                    <div class="selected-summary">Terpilih: <strong id="selectedChatsCount">0</strong></div>
+                  </div>
+                  
+                  <div class="wa-chats-list" id="waChatsList">
+                    <div class="wa-chats-empty">
+                      <i class="fa-solid fa-comments"></i>
+                      <p>Silakan klik "Muat Chat Aktif" untuk mengambil daftar chat Anda.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab Content 3: Input Manual -->
+              <div class="tab-content" id="contentInputManual" style="display: none; margin-top: 15px;">
+                <div class="form-group">
+                  <label for="manualNumbersInput">Daftar Nomor (Satu nomor per baris)</label>
+                  <textarea id="manualNumbersInput" placeholder="Contoh format:
+628123456789|Budi
+628987654321|Andi
+628111222333" style="min-height: 150px; font-family: monospace; font-size: 0.95rem;"></textarea>
+                  <small class="form-help">Format: <code>nomor|nama</code> atau cukup <code>nomor</code> saja (satu per baris).</small>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                  <div class="upload-feedback" style="background: rgba(0, 242, 254, 0.08); border-color: rgba(0, 242, 254, 0.2);">
+                    <i class="fa-solid fa-info-circle" style="color: var(--color-primary);"></i> Terdeteksi: <strong id="parsedManualCount">0</strong> nomor kontak.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Column 2: Settings & Actions -->
+          <div class="glass-card flex-column">
+            <h2><i class="fa-solid fa-sliders"></i> Pengaturan Kampanye</h2>
+
+            <div class="settings-grid">
+              <div class="form-group">
+                <label for="delay">Delay Antar Pesan (detik)</label>
+                <input type="number" id="delay" value="10" min="2" max="60">
+                <small class="form-help">Waktu tunggu sebelum pesan berikutnya dikirim. Minimal 2 detik (direkomendasikan: 5-10 detik).</small>
+              </div>
+
+              <div class="form-group">
+                <label for="sleepAfter">Sleep Setiap (jumlah pesan)</label>
+                <input type="number" id="sleepAfter" value="50" min="0">
+                <small class="form-help">Jeda panjang setelah mengirim sejumlah pesan. Isi 0 untuk menonaktifkan.</small>
+              </div>
+
+              <div class="form-group">
+                <label for="sleepDuration">Durasi Sleep (detik)</label>
+                <input type="number" id="sleepDuration" value="300" min="10">
+                <small class="form-help">Berapa lama jeda panjang berlangsung (direkomendasikan: 300 detik atau 5 menit).</small>
+              </div>
+            </div>
+
+            <div class="variations-section">
+              <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Variasi Pesan Anti-Banned</h3>
+              <div class="checkbox-group">
+                <label class="checkbox-container">
+                  <input type="checkbox" id="useSpintax" checked>
+                  <span class="checkmark"></span>
+                  Gunakan Spintax <code>{Halo|Hai}</code>
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="useDynamicVars" checked>
+                  <span class="checkmark"></span>
+                  Variabel Dinamis <code>{date}</code>, <code>{random_string}</code>
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="useEmoji">
+                  <span class="checkmark"></span>
+                  Tambahkan Emoji Acak 😊 👍 ✨
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="useWhitespace">
+                  <span class="checkmark"></span>
+                  Variasi Whitespace (spasi unik)
+                </label>
+                <label class="checkbox-container">
+                  <input type="checkbox" id="useRandomSuffix">
+                  <span class="checkmark"></span>
+                  Tambahkan Suffix Karakter Acak (Legacy)
+                </label>
+              </div>
+            </div>
+
+            <div class="action-buttons-wrapper">
+              <button class="btn btn-success btn-lg btn-block" id="btnStartCampaign" disabled>
+                <i class="fa-solid fa-paper-plane"></i> Mulai Blast Kampanye
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROGRESS SECTION (HIDDEN BY DEFAULT) -->
+        <div class="glass-card campaign-progress-card" id="progressCard" style="display: none;">
+          <div class="progress-card-header">
+            <h2><i class="fa-solid fa-spinner fa-spin text-primary" id="progressSpinner"></i> Progress Blast Kampanye</h2>
+            <div class="control-actions">
+              <button class="btn btn-warning btn-sm" id="btnPauseCampaign"><i class="fa-solid fa-pause"></i> Pause</button>
+              <button class="btn btn-success btn-sm" id="btnResumeCampaign" style="display: none;"><i class="fa-solid fa-play"></i> Resume</button>
+              <button class="btn btn-danger btn-sm" id="btnCancelCampaign"><i class="fa-solid fa-circle-xmark"></i> Batal</button>
+            </div>
+          </div>
+
+          <!-- Progress Stats Grid -->
+          <div class="progress-stats-grid">
+            <div class="stat-box">
+              <div class="stat-val" id="statSuccess">0</div>
+              <div class="stat-lbl">Sukses</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-val" id="statFailed">0</div>
+              <div class="stat-lbl">Gagal</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-val"><span id="statProgressCount">0</span>/<span id="statTotalCount">0</span></div>
+              <div class="stat-lbl">Terkirim</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-val" id="statPercentage">0%</div>
+              <div class="stat-lbl">Presentase</div>
+            </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+          </div>
+
+          <!-- Terminal Logs -->
+          <div class="terminal-logs-wrapper">
+            <div class="terminal-header">
+              <span><i class="fa-solid fa-terminal"></i> Log Aktivitas</span>
+              <button class="btn-clear-terminal" id="btnClearTerminal">Clear Logs</button>
+            </div>
+            <div class="terminal-body" id="terminalLogs">
+              <div class="log-line log-info">Menunggu kampanye dimulai...</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+
+  <!-- Client-side QRCode Generator -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Socket.io -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Main Script -->
+  <script src="app.js"></script>
+</body>
+</html>

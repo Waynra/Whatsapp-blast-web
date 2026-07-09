@@ -230,49 +230,87 @@ class WhatsAppClient extends EventEmitter {
     }
     try {
       logger.info('Fetching active chats...');
-      const chats = await this.client.getChats();
       
-      // Resolve LIDs to phone numbers in the background
-      const lidIds = chats
-        .filter(chat => chat.id && chat.id._serialized && chat.id._serialized.endsWith('@lid'))
-        .map(chat => chat.id._serialized);
-      
-      if (lidIds.length > 0 && typeof this.client.getContactLidAndPhone === 'function') {
-        logger.info(`Triggering background resolution for ${lidIds.length} LIDs...`);
-        this.client.getContactLidAndPhone(lidIds).then(mapping => {
-          if (Array.isArray(mapping)) {
-            const updates = {};
-            mapping.forEach(item => {
-              if (item.lid && item.pn) {
-                const rawPhone = item.pn.split('@')[0];
-                updates[item.lid] = {
-                  displayId: rawPhone,
-                  targetJid: `${rawPhone}@c.us`
-                };
-              }
-            });
-            if (Object.keys(updates).length > 0) {
-              logger.info(`Resolved ${Object.keys(updates).length} LIDs in the background.`);
-              this.emit('chats_resolved', updates);
+      // Try fast custom page evaluation first
+      let chats = [];
+      const page = this.client.pupPage || this.client.page;
+      if (page) {
+        try {
+          chats = await page.evaluate(() => {
+            if (typeof window.Store === 'undefined' || !window.Store.Chat) {
+              return null;
             }
+            // Sort by timestamp descending and take the top 150 chats
+            const allChats = window.Store.Chat.models || [];
+            const sorted = [...allChats].sort((a, b) => (b.t || 0) - (a.t || 0));
+            return sorted.slice(0, 150).map(chat => {
+              return {
+                id: chat.id._serialized,
+                name: chat.name || '',
+                isGroup: chat.isGroup || false,
+                unreadCount: chat.unreadCount || 0,
+                timestamp: chat.t || 0,
+                displayId: chat.id.user
+              };
+            });
+          });
+          if (chats) {
+            logger.info(`Successfully fetched ${chats.length} active chats via fast evaluation.`);
           }
-        }).catch(err => {
-          logger.error('Error resolving LIDs in background:', err);
+        } catch (evalErr) {
+          logger.warn('Fast chat evaluation failed, falling back to standard getChats:', evalErr.message);
+        }
+      }
+
+      // If fast evaluation returned null/empty, use standard getChats
+      if (!chats || chats.length === 0) {
+        const rawChats = await this.client.getChats();
+        chats = rawChats.map(chat => {
+          return {
+            id: chat.id._serialized,
+            name: chat.name,
+            isGroup: chat.isGroup,
+            unreadCount: chat.unreadCount || 0,
+            timestamp: chat.timestamp || 0,
+            displayId: chat.id.user
+          };
         });
       }
 
-      // Return raw list immediately
-      return chats.map(chat => {
-        const jid = chat.id._serialized;
-        return {
-          id: jid,
-          name: chat.name,
-          isGroup: chat.isGroup,
-          unreadCount: chat.unreadCount || 0,
-          timestamp: chat.timestamp || 0,
-          displayId: chat.id.user
-        };
-      });
+      // Resolve LIDs to phone numbers in the background
+      const lidIds = chats
+        .filter(chat => chat.id && chat.id.endsWith('@lid'))
+        .map(chat => chat.id);
+      
+      if (lidIds.length > 0) {
+        logger.info(`Triggering background resolution for ${lidIds.length} LIDs...`);
+        
+        // Resolve each LID in the background without blocking
+        (async () => {
+          const updates = {};
+          for (const lidJid of lidIds) {
+            try {
+              const contact = await this.client.getContactById(lidJid);
+              if (contact && contact.number) {
+                updates[lidJid] = {
+                  displayId: contact.number,
+                  targetJid: `${contact.number}@c.us`
+                };
+              }
+            } catch (err) {
+              logger.debug(`Could not resolve LID ${lidJid}: ${err.message}`);
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            logger.info(`Resolved ${Object.keys(updates).length} LIDs in the background.`);
+            this.emit('chats_resolved', updates);
+          }
+        })().catch(err => {
+          logger.error('Error resolving LIDs in background loop:', err);
+        });
+      }
+
+      return chats;
     } catch (error) {
       logger.error('Error fetching active chats:', error);
       return [];

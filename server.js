@@ -279,6 +279,27 @@ app.get('/api/reports/:name', (req, res) => {
   res.download(filePath);
 });
 
+// Delete a report
+app.delete('/api/reports/:name', (req, res) => {
+  const name = req.params.name;
+  if (name.includes('..') || name.includes('/') || name.includes('\\')) {
+    return res.status(400).json({ success: false, error: 'Invalid file name' });
+  }
+
+  const filePath = path.join(config.directories.report, `${name}.txt`);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ success: false, error: 'Report not found' });
+  }
+  
+  try {
+    fs.unlinkSync(filePath);
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Error deleting report file:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Campaign control routes
 app.post('/api/start-campaign', async (req, res) => {
   try {

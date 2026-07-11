@@ -128,7 +128,9 @@ npm run cli
 
 Format: `phone_number|name` (one per line)
 ```text
-6281234567890|Budi
+
+contoh
+628123456789|Budi
 6281234567891|Andi
 6281234567892
 ```

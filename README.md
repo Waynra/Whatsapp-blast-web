@@ -46,6 +46,30 @@ A premium, modern web dashboard application to manage bulk messaging campaigns o
 
 ---
 
+## 💻 Tech Stack
+
+Sistem ini dibangun menggunakan teknologi modern berbasis JavaScript:
+*   **Backend (Server Side):**
+    *   **Node.js**: Lingkungan runtime JavaScript untuk mengeksekusi aplikasi.
+    *   **Express.js**: Web framework minimalis untuk menangani rute REST API HTTP (seperti blacklist, reports, dan templates).
+    *   **Socket.io**: Protokol WebSockets untuk memancarkan status QR Code, persentase progress blast, dan log aktivitas ke dashboard secara real-time.
+    *   **Multer**: Middleware untuk menangani upload file daftar nomor kontak `.txt`.
+    *   **Winston**: Sistem logging untuk merekam log aplikasi ke file lokal (`logs/`).
+*   **WhatsApp Automation Core:**
+    *   **whatsapp-web.js**: Library utama untuk mengemulasi koneksi ke WhatsApp Web.
+    *   **Puppeteer**: Browser Headless Chrome otomatis yang dijalankan di latar belakang oleh `whatsapp-web.js` untuk menghubungkan sesi WhatsApp dan mengirimkan pesan.
+*   **Frontend (Dashboard Web):**
+    *   **HTML5 & Vanilla CSS3**: Tampilan modern responsif bergaya *Glassmorphic* dengan dukungan *Dark/Light Mode*.
+    *   **Vanilla JS (ES6+)**: Menangani interaksi frontend, unggahan file, pemilihan chat, dan pembaruan antarmuka secara asinkron.
+    *   **qrcode.js**: Untuk merender teks QR Code dari backend menjadi kode QR visual di web.
+    *   **FontAwesome v6**: Penyedia ikon grafis di dasbor.
+*   **CLI (Command Line Interface):**
+    *   **Chalk**: Pewarna teks keluaran terminal.
+    *   **Cli-Progress**: Menampilkan animasi progress bar pengiriman di command line.
+    *   **Readline-Sync**: Menangani input tanya-jawab interaktif saat setup aplikasi.
+
+---
+
 ## 🛠️ Installation
 
 ### Prerequisites

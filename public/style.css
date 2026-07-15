@@ -1261,6 +1261,12 @@ code {
   border: 1px solid rgba(192, 132, 252, 0.2);
 }
 
+.wa-badge-lid {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
 .wa-chat-avatar {
   width: 32px;
   height: 32px;
@@ -1365,4 +1371,45 @@ code {
   .campaign-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Premium Enhancements for Media Upload, Scheduler, and Chart */
+.media-drop-zone {
+  border: 2px dashed var(--border-card);
+  padding: 20px;
+  border-radius: var(--radius-md);
+  text-align: center;
+  cursor: pointer;
+  transition: var(--transition);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.media-drop-zone:hover {
+  border-color: var(--color-primary);
+  background: rgba(0, 242, 254, 0.02);
+}
+
+.media-drop-zone i {
+  font-size: 1.8rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  transition: var(--transition);
+}
+
+.media-drop-zone:hover i {
+  color: var(--color-primary);
+  transform: scale(1.1);
+}
+
+.template-actions input:focus {
+  border-color: var(--color-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.campaign-analytics-row {
+  margin-top: 15px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.01);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-card);
 }

@@ -18,6 +18,10 @@ const qrPlaceholder = document.getElementById('qrPlaceholder');
 const qrcodeContainer = document.getElementById('qrcode');
 
 const messageTemplate = document.getElementById('messageTemplate');
+const templateNameInput = document.getElementById('templateNameInput');
+const btnSaveTemplate = document.getElementById('btnSaveTemplate');
+const btnDeleteTemplate = document.getElementById('btnDeleteTemplate');
+
 const fileDropZone = document.getElementById('fileDropZone');
 const contactsFileInput = document.getElementById('contactsFileInput');
 const uploadFeedback = document.getElementById('uploadFeedback');
@@ -26,9 +30,11 @@ const contactsCount = document.getElementById('contactsCount');
 const contactsPreviewGroup = document.getElementById('contactsPreviewGroup');
 const contactsPreviewBox = document.getElementById('contactsPreviewBox');
 
-const delayInput = document.getElementById('delay');
+const delayMinInput = document.getElementById('delayMin');
+const delayMaxInput = document.getElementById('delayMax');
 const sleepAfterInput = document.getElementById('sleepAfter');
 const sleepDurationInput = document.getElementById('sleepDuration');
+const scheduledTimeInput = document.getElementById('scheduledTimeInput');
 
 const useSpintax = document.getElementById('useSpintax');
 const useDynamicVars = document.getElementById('useDynamicVars');
@@ -55,6 +61,13 @@ const btnClearTerminal = document.getElementById('btnClearTerminal');
 const templateList = document.getElementById('templateList');
 const reportList = document.getElementById('reportList');
 
+// Media Attachment UI Elements
+const mediaDropZone = document.getElementById('mediaDropZone');
+const mediaFileInput = document.getElementById('mediaFileInput');
+const mediaUploadFeedback = document.getElementById('mediaUploadFeedback');
+const attachedMediaName = document.getElementById('attachedMediaName');
+const btnRemoveMedia = document.getElementById('btnRemoveMedia');
+
 // Tab Selection Elements
 const tabUploadFile = document.getElementById('tabUploadFile');
 const tabSelectWA = document.getElementById('tabSelectWA');
@@ -72,6 +85,7 @@ const waChatSearch = document.getElementById('waChatSearch');
 const filterAll = document.getElementById('filterAll');
 const filterPrivate = document.getElementById('filterPrivate');
 const filterGroups = document.getElementById('filterGroups');
+const filterPhonebook = document.getElementById('filterPhonebook');
 const chkSelectAllChats = document.getElementById('chkSelectAllChats');
 const visibleChatsCount = document.getElementById('visibleChatsCount');
 const selectedChatsCount = document.getElementById('selectedChatsCount');
@@ -85,13 +99,19 @@ let uploadedFileNameBackup = 'web-contacts'; // Backup for uploaded file name
 let currentStatus = { state: 'disconnected', ready: false };
 let isCampaignRunning = false;
 let manualNumbers = null; // Stored parsed numbers from manual input
+let uploadedMedia = null; // Store media file metadata
 
 // Active WA selection state
 let activeTab = 'upload'; // 'upload' or 'whatsapp'
 let rawWAData = []; // Array of active chats fetched from API
+let phonebookData = []; // Store fetched phonebook contacts
 let selectedChats = new Set(); // Set of serialized chat IDs that are checked
-let waFilter = 'all'; // 'all', 'private', 'groups'
+let waFilter = 'all'; // 'all', 'private', 'groups', 'phonebook'
 let waSearchQuery = '';
+
+// Chart.js & Read Receipts Stats
+let campaignChart = null;
+let ackStats = { sent: 0, delivered: 0, read: 0 };
 
 // 1. Connection & Status Management
 socket.on('status', (status) => {
@@ -206,12 +226,65 @@ async function loadTemplateContent(name) {
     const data = await res.json();
     if (data.success) {
       messageTemplate.value = data.content;
+      templateNameInput.value = name;
+      btnDeleteTemplate.removeAttribute('disabled');
       addLogLine('info', `Loaded template: ${name}`);
     }
   } catch (err) {
     console.error('Error loading template content:', err);
   }
 }
+
+// Save template button
+btnSaveTemplate.addEventListener('click', async () => {
+  const name = templateNameInput.value.trim();
+  const content = messageTemplate.value.trim();
+  if (!name || !content) {
+    alert('Nama template dan isi pesan tidak boleh kosong.');
+    return;
+  }
+  try {
+    const res = await fetch('/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, content })
+    });
+    const data = await res.json();
+    if (data.success) {
+      addLogLine('success', `Template "${name}" berhasil disimpan ke database.`);
+      loadTemplates();
+      btnDeleteTemplate.removeAttribute('disabled');
+    } else {
+      alert('Gagal menyimpan template: ' + data.error);
+    }
+  } catch (err) {
+    console.error('Error saving template:', err);
+  }
+});
+
+// Delete template button
+btnDeleteTemplate.addEventListener('click', async () => {
+  const name = templateNameInput.value.trim();
+  if (!name) return;
+  if (!confirm(`Apakah Anda yakin ingin menghapus template "${name}"?`)) return;
+  try {
+    const res = await fetch(`/api/templates/${name}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (data.success) {
+      addLogLine('success', `Template "${name}" berhasil dihapus.`);
+      messageTemplate.value = '';
+      templateNameInput.value = '';
+      btnDeleteTemplate.setAttribute('disabled', 'true');
+      loadTemplates();
+    } else {
+      alert('Gagal menghapus template: ' + data.error);
+    }
+  } catch (err) {
+    console.error('Error deleting template:', err);
+  }
+});
 
 async function loadReports() {
   try {
@@ -270,7 +343,7 @@ async function deleteReport(name) {
   }
 }
 
-// 3. File Upload handling
+// 3. File Upload handling (XLSX, CSV, TXT)
 fileDropZone.addEventListener('click', () => contactsFileInput.click());
 
 contactsFileInput.addEventListener('change', (e) => {
@@ -327,9 +400,30 @@ async function handleFileUpload(file) {
       data.numbers.slice(0, 15).forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'preview-row';
+        row.style.flexDirection = 'column';
+        row.style.alignItems = 'flex-start';
+        row.style.gap = '2px';
+        row.style.padding = '8px 12px';
+
+        let varsBadge = '';
+        if (item.variables) {
+          const varKeys = Object.keys(item.variables).filter(k => {
+            const kl = k.toLowerCase();
+            return kl !== 'phone' && kl !== 'name' && !kl.includes('phone') && !kl.includes('nomor') && !kl.includes('telp') && !kl.includes('hp') && !kl.includes('nama');
+          });
+          if (varKeys.length > 0) {
+            varsBadge = `<div class="preview-vars" style="font-size: 0.75rem; opacity: 0.7; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">` + 
+              varKeys.map(k => `<span style="background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.15); padding: 2px 6px; border-radius: 4px; color: var(--color-primary);">{${k}}: ${item.variables[k]}</span>`).join('') + 
+              `</div>`;
+          }
+        }
+
         row.innerHTML = `
-          <span class="preview-num">${item.number}</span>
-          <span class="preview-name">${item.name || '<i style="opacity:0.5">No Name</i>'}</span>
+          <div style="display: flex; justify-content: space-between; width: 100%;">
+            <span class="preview-num">${item.number}</span>
+            <span class="preview-name">${item.name || '<i style="opacity:0.5">No Name</i>'}</span>
+          </div>
+          ${varsBadge}
         `;
         contactsPreviewBox.appendChild(row);
       });
@@ -356,6 +450,68 @@ async function handleFileUpload(file) {
   }
 }
 
+// 3.1 Media Attachment Drag-and-Drop and Click Handler
+mediaDropZone.addEventListener('click', () => mediaFileInput.click());
+mediaFileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) {
+    handleMediaUpload(e.target.files[0]);
+  }
+});
+
+mediaDropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  mediaDropZone.style.borderColor = 'var(--color-primary)';
+});
+
+mediaDropZone.addEventListener('dragleave', () => {
+  mediaDropZone.style.borderColor = 'var(--border-card)';
+});
+
+mediaDropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  mediaDropZone.style.borderColor = 'var(--border-card)';
+  if (e.dataTransfer.files.length > 0) {
+    handleMediaUpload(e.dataTransfer.files[0]);
+  }
+});
+
+async function handleMediaUpload(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload-media', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if (data.success) {
+      uploadedMedia = {
+        filePath: data.filePath,
+        originalName: data.originalName,
+        mimeType: data.mimeType
+      };
+      attachedMediaName.innerText = file.name;
+      mediaUploadFeedback.style.display = 'block';
+      mediaDropZone.style.display = 'none';
+      addLogLine('success', `File media dilampirkan: ${file.name}`);
+    } else {
+      alert('Gagal mengunggah media: ' + data.error);
+    }
+  } catch (err) {
+    console.error('Error uploading media:', err);
+    alert('Terjadi kesalahan saat melampirkan media.');
+  }
+}
+
+btnRemoveMedia.addEventListener('click', () => {
+  uploadedMedia = null;
+  mediaFileInput.value = '';
+  mediaUploadFeedback.style.display = 'none';
+  mediaDropZone.style.display = 'block';
+  addLogLine('info', 'Lampiran media dihapus.');
+});
+
 // 4. Campaign Actions
 btnStartCampaign.addEventListener('click', async () => {
   const template = messageTemplate.value.trim();
@@ -368,21 +524,30 @@ btnStartCampaign.addEventListener('click', async () => {
     return;
   }
 
-  const delayVal = parseInt(delayInput.value) * 1000;
+  const delayMinVal = parseInt(delayMinInput.value) * 1000;
+  const delayMaxVal = parseInt(delayMaxInput.value) * 1000;
   const sleepAfterVal = parseInt(sleepAfterInput.value);
   const sleepDurationVal = parseInt(sleepDurationInput.value) * 1000;
+  
+  // Scheduler parsing
+  const scheduledAtVal = scheduledTimeInput.value ? new Date(scheduledTimeInput.value).toISOString() : null;
 
   const campaignData = {
     data: {
       numbers: loadedNumbers,
       textTemplate: template,
-      textFileName: 'web-campaign',
-      numberFileName: uploadName
+      textFileName: templateNameInput.value.trim() || 'web-campaign',
+      numberFileName: uploadName,
+      mediaPath: uploadedMedia ? uploadedMedia.filePath : null,
+      mediaName: uploadedMedia ? uploadedMedia.originalName : null,
+      mediaType: uploadedMedia ? uploadedMedia.mimeType : null
     },
     options: {
-      delay: delayVal,
+      delayMin: delayMinVal,
+      delayMax: delayMaxVal,
       sleepAfter: sleepAfterVal,
       sleepDuration: sleepDurationVal,
+      scheduledAt: scheduledAtVal,
       messageVariation: {
         useSpintax: useSpintax.checked,
         useDynamicVars: useDynamicVars.checked,
@@ -402,7 +567,16 @@ btnStartCampaign.addEventListener('click', async () => {
       body: JSON.stringify(campaignData)
     });
     const result = await res.json();
-    if (!result.success) {
+    if (result.success) {
+      if (scheduledAtVal) {
+        alert(`Kampanye berhasil dijadwalkan pada: ${new Date(scheduledAtVal).toLocaleString()}`);
+        addLogLine('success', `Kampanye dijadwalkan untuk: ${new Date(scheduledAtVal).toLocaleString()}`);
+        // Clear schedule time input
+        scheduledTimeInput.value = '';
+      } else {
+        // Immediate campaign progress starts (handled via sockets)
+      }
+    } else {
       alert(`Gagal memulai: ${result.error}`);
     }
   } catch (err) {
@@ -421,7 +595,6 @@ btnCancelCampaign.addEventListener('click', () => {
 
 btnDisconnect.addEventListener('click', async () => {
   if (confirm('Apakah Anda yakin ingin memutuskan sesi WhatsApp ini?')) {
-    // Show instant loading state in UI
     statusDot.className = 'status-dot dot-connecting';
     statusText.innerText = 'Disconnecting...';
     headerStatusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Disconnecting...';
@@ -444,6 +617,48 @@ btnClearTerminal.addEventListener('click', () => {
   terminalLogs.innerHTML = '';
 });
 
+// 4.2 Chart.js Setup and Visualization logic
+function initChart() {
+  const ctx = document.getElementById('campaignChart').getContext('2d');
+  if (campaignChart) {
+    campaignChart.destroy();
+  }
+  campaignChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Sukses', 'Gagal', 'Pending'],
+      datasets: [{
+        data: [0, 0, 1], // default look (all grey pending)
+        backgroundColor: ['#25d366', '#ef4444', 'rgba(255, 255, 255, 0.05)'],
+        hoverBackgroundColor: ['#20ba5a', '#dc2626', 'rgba(255, 255, 255, 0.1)'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }
+      },
+      cutout: '75%'
+    }
+  });
+}
+
+function updateChartVisuals(success, failed, total) {
+  const pending = Math.max(0, total - (success + failed));
+  if (campaignChart) {
+    campaignChart.data.datasets[0].data = [success, failed, pending];
+    campaignChart.update();
+  }
+}
+
+function updateAckUI() {
+  document.getElementById('legendSent').innerText = ackStats.sent;
+  document.getElementById('legendDelivered').innerText = ackStats.delivered;
+  document.getElementById('legendRead').innerText = ackStats.read;
+}
+
 // Socket Campaign Events
 socket.on('campaign_status', (data) => {
   if (data.status === 'running') {
@@ -456,6 +671,11 @@ socket.on('campaign_status', (data) => {
     
     // Disable input controls
     toggleInputs(true);
+    
+    // Reset analytics and charts
+    ackStats = { sent: 0, delivered: 0, read: 0 };
+    updateAckUI();
+    initChart();
   } else if (data.status === 'paused') {
     isCampaignRunning = true;
     progressCard.style.display = 'block';
@@ -492,10 +712,28 @@ socket.on('campaign_progress', (data) => {
   const percent = Math.round((data.index / data.total) * 100);
   statPercentage.innerText = `${percent}%`;
   progressBarFill.style.width = `${percent}%`;
+  
+  updateChartVisuals(data.success, data.failed, data.total);
 });
 
 socket.on('campaign_log', (data) => {
   addLogLine(data.type, data.message);
+});
+
+// Socket listener for read receipts (ack updates)
+socket.on('message_ack', (data) => {
+  // ack values: 2 = server (sent), 3 = device (delivered), 4 = read (blue ticks)
+  if (data.ack === 2) {
+    ackStats.sent++;
+    addLogLine('info', `[Sent] Pesan terkirim ke server WhatsApp`);
+  } else if (data.ack === 3) {
+    ackStats.delivered++;
+    addLogLine('info', `[Delivered] Pesan terkirim ke HP penerima`);
+  } else if (data.ack === 4) {
+    ackStats.read++;
+    addLogLine('success', `[Read] Pesan telah dibaca oleh penerima`);
+  }
+  updateAckUI();
 });
 
 function addLogLine(type, message) {
@@ -506,19 +744,21 @@ function addLogLine(type, message) {
   line.innerText = `[${timestamp}] ${message}`;
   
   terminalLogs.appendChild(line);
-  
-  // Auto-scroll to bottom
   terminalLogs.scrollTop = terminalLogs.scrollHeight;
 }
 
 function toggleInputs(disabled) {
   const elements = [
     messageTemplate,
+    templateNameInput,
+    btnSaveTemplate,
     contactsFileInput,
     manualNumbersInput,
-    delayInput,
+    delayMinInput,
+    delayMaxInput,
     sleepAfterInput,
     sleepDurationInput,
+    scheduledTimeInput,
     useSpintax,
     useDynamicVars,
     useEmoji,
@@ -527,19 +767,25 @@ function toggleInputs(disabled) {
   ];
 
   elements.forEach(el => {
-    if (disabled) {
-      el.setAttribute('disabled', 'true');
-    } else {
-      el.removeAttribute('disabled');
+    if (el) {
+      if (disabled) {
+        el.setAttribute('disabled', 'true');
+      } else {
+        el.removeAttribute('disabled');
+      }
     }
   });
 
   if (disabled) {
     fileDropZone.style.pointerEvents = 'none';
     fileDropZone.style.opacity = '0.5';
+    mediaDropZone.style.pointerEvents = 'none';
+    mediaDropZone.style.opacity = '0.5';
   } else {
     fileDropZone.style.pointerEvents = 'auto';
     fileDropZone.style.opacity = '1';
+    mediaDropZone.style.pointerEvents = 'auto';
+    mediaDropZone.style.opacity = '1';
   }
 }
 
@@ -629,15 +875,48 @@ async function fetchActiveChats() {
 
 btnLoadWAData.addEventListener('click', fetchActiveChats);
 
+// Load all phonebook contacts from WhatsApp
+async function fetchPhonebookContacts() {
+  if (!currentStatus.ready) return;
+
+  loadWAIcon.classList.add('fa-spin');
+  btnLoadWAData.setAttribute('disabled', 'true');
+  
+  try {
+    const res = await fetch('/api/contacts');
+    const data = await res.json();
+    if (data.success) {
+      phonebookData = data.contacts;
+      selectedChats.clear();
+      chkSelectAllChats.checked = false;
+      renderWAConversations();
+      addLogLine('success', `Berhasil memuat ${data.contacts.length} kontak dari buku telepon WhatsApp.`);
+    } else {
+      addLogLine('error', `Gagal memuat buku kontak: ${data.error}`);
+    }
+  } catch (err) {
+    console.error('Error fetching phonebook contacts:', err);
+    addLogLine('error', 'Gagal memuat buku kontak. Periksa koneksi.');
+  } finally {
+    loadWAIcon.classList.remove('fa-spin');
+    btnLoadWAData.removeAttribute('disabled');
+  }
+}
+
 // Render list of WA conversations
 function renderWAConversations() {
   waChatsList.innerHTML = '';
   
+  // Pilih sumber data berdasarkan filter (Chat Aktif vs Buku Kontak)
+  const sourceData = waFilter === 'phonebook' ? phonebookData : rawWAData;
+  
   // Apply Search and Filters
-  const filtered = rawWAData.filter(chat => {
-    // Filter Group vs Private
-    if (waFilter === 'private' && chat.isGroup) return false;
-    if (waFilter === 'groups' && !chat.isGroup) return false;
+  const filtered = sourceData.filter(chat => {
+    // Hanya apply filter pribadi/grup jika bukan tab phonebook
+    if (waFilter !== 'phonebook') {
+      if (waFilter === 'private' && chat.isGroup) return false;
+      if (waFilter === 'groups' && !chat.isGroup) return false;
+    }
     
     // Search Query
     if (waSearchQuery) {
@@ -669,21 +948,23 @@ function renderWAConversations() {
     const item = document.createElement('div');
     item.className = 'wa-chat-item';
     
-    const initials = (chat.name || '?').substring(0, 2).toUpperCase();
-    const badgeClass = chat.isGroup ? 'wa-badge-group' : 'wa-badge-private';
-    const badgeText = chat.isGroup ? 'Group' : 'Pribadi';
     const cleanId = chat.id.split('@')[0];
     const displayNum = chat.displayId || cleanId;
+    const isLid = chat.id && (chat.id.endsWith('@lid') || (cleanId.startsWith('1') && cleanId.length >= 13));
+    
+    const initials = (chat.name || '?').substring(0, 2).toUpperCase();
+    const badgeClass = chat.isGroup ? 'wa-badge-group' : (isLid ? 'wa-badge-lid' : 'wa-badge-private');
+    const badgeText = chat.isGroup ? 'Group' : (isLid ? 'LID (Abaikan)' : 'Pribadi');
 
     item.innerHTML = `
-      <div class="wa-chat-left">
+      <div class="wa-chat-left" style="${isLid ? 'opacity: 0.6;' : ''}">
         <label class="checkbox-container">
-          <input type="checkbox" class="wa-chat-checkbox" data-id="${chat.id}" ${isChecked ? 'checked' : ''}>
+          <input type="checkbox" class="wa-chat-checkbox" data-id="${chat.id}" ${isChecked ? 'checked' : ''} ${isLid ? 'disabled' : ''}>
           <span class="checkmark"></span>
         </label>
-        <div class="wa-chat-avatar">${initials}</div>
+        <div class="wa-chat-avatar" style="${isLid ? 'background: #2a1515; color: #ef4444;' : ''}">${initials}</div>
         <div class="wa-chat-info">
-          <div class="wa-chat-name" title="${chat.name}">${chat.name || displayNum}</div>
+          <div class="wa-chat-name" title="${chat.name || ''}">${chat.name || displayNum} ${isLid ? '<span style="font-size:0.75rem; color:#ef4444; font-style:italic;">(LID)</span>' : ''}</div>
           <div class="wa-chat-details">${displayNum}</div>
         </div>
       </div>
@@ -692,38 +973,51 @@ function renderWAConversations() {
 
     // Checkbox toggle listener
     const checkbox = item.querySelector('.wa-chat-checkbox');
-    checkbox.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        selectedChats.add(chat.id);
-      } else {
-        selectedChats.delete(chat.id);
-      }
-      
-      // Update counts and selections
-      selectedChatsCount.innerText = selectedChats.size;
-      updateCampaignButtonForWA();
-      
-      // check if all filtered are checked
-      const allFilteredChecked = filtered.every(c => selectedChats.has(c.id));
-      chkSelectAllChats.checked = allFilteredChecked;
-    });
+    if (checkbox && !isLid) {
+      checkbox.addEventListener('change', (e) => {
+        if (e.target.checked) {
+          selectedChats.add(chat.id);
+        } else {
+          selectedChats.delete(chat.id);
+        }
+        
+        // Update counts and selections
+        selectedChatsCount.innerText = selectedChats.size;
+        updateCampaignButtonForWA();
+        
+        // check if all filtered non-LIDs are checked
+        const nonLidFiltered = filtered.filter(c => {
+          const cClean = c.id.split('@')[0];
+          return !(c.id.endsWith('@lid') || (cClean.startsWith('1') && cClean.length >= 13));
+        });
+        const allFilteredChecked = nonLidFiltered.length > 0 && nonLidFiltered.every(c => selectedChats.has(c.id));
+        chkSelectAllChats.checked = allFilteredChecked;
+      });
+    }
 
     waChatsList.appendChild(item);
   });
 
-  // Handle Select All Checkbox State
-  const allChecked = filtered.length > 0 && filtered.every(c => selectedChats.has(c.id));
+  // Handle Select All Checkbox State (ignoring LIDs)
+  const nonLidFiltered = filtered.filter(c => {
+    const cClean = c.id.split('@')[0];
+    return !(c.id.endsWith('@lid') || (cClean.startsWith('1') && cClean.length >= 13));
+  });
+  const allChecked = nonLidFiltered.length > 0 && nonLidFiltered.every(c => selectedChats.has(c.id));
   chkSelectAllChats.checked = allChecked;
 }
 
 // Select All visible chats toggle
 chkSelectAllChats.addEventListener('change', (e) => {
   const isChecked = e.target.checked;
+  const sourceData = waFilter === 'phonebook' ? phonebookData : rawWAData;
   
   // Find currently filtered chats
-  const filtered = rawWAData.filter(chat => {
-    if (waFilter === 'private' && chat.isGroup) return false;
-    if (waFilter === 'groups' && !chat.isGroup) return false;
+  const filtered = sourceData.filter(chat => {
+    if (waFilter !== 'phonebook') {
+      if (waFilter === 'private' && chat.isGroup) return false;
+      if (waFilter === 'groups' && !chat.isGroup) return false;
+    }
     if (waSearchQuery) {
       const q = waSearchQuery.toLowerCase();
       return (chat.name && chat.name.toLowerCase().includes(q)) || (chat.id && chat.id.toLowerCase().includes(q));
@@ -733,7 +1027,11 @@ chkSelectAllChats.addEventListener('change', (e) => {
 
   filtered.forEach(chat => {
     if (isChecked) {
-      selectedChats.add(chat.id);
+      const cleanId = chat.id.split('@')[0];
+      const isLid = chat.id && (chat.id.endsWith('@lid') || (cleanId.startsWith('1') && cleanId.length >= 13));
+      if (!isLid) {
+        selectedChats.add(chat.id);
+      }
     } else {
       selectedChats.delete(chat.id);
     }
@@ -763,8 +1061,20 @@ filterGroups.addEventListener('click', () => {
   renderWAConversations();
 });
 
+filterPhonebook.addEventListener('click', async () => {
+  waFilter = 'phonebook';
+  setActiveFilterPill(filterPhonebook);
+  if (phonebookData.length === 0 && currentStatus.ready) {
+    await fetchPhonebookContacts();
+  } else {
+    renderWAConversations();
+  }
+});
+
 function setActiveFilterPill(activePill) {
-  [filterAll, filterPrivate, filterGroups].forEach(pill => pill.classList.remove('active'));
+  [filterAll, filterPrivate, filterGroups, filterPhonebook].forEach(pill => {
+    if (pill) pill.classList.remove('active');
+  });
   activePill.classList.add('active');
 }
 
@@ -782,7 +1092,10 @@ function updateCampaignButtonForWA() {
       
       // Update loadedNumbers to match selection format
       loadedNumbers = Array.from(selectedChats).map(id => {
-        const chat = rawWAData.find(c => c.id === id);
+        let chat = rawWAData.find(c => c.id === id);
+        if (!chat) {
+          chat = phonebookData.find(c => c.id === id);
+        }
         return {
           number: id,
           name: chat ? chat.name : null
@@ -977,22 +1290,17 @@ socket.on('chats_resolved', (updates) => {
   // Dynamically update the DOM elements currently on screen
   Object.keys(updates).forEach(lidJid => {
     const data = updates[lidJid];
-    // Find checkboxes with data-id matching the lidJid
     const checkboxes = document.querySelectorAll(`.wa-chat-checkbox[data-id="${lidJid}"]`);
     checkboxes.forEach(checkbox => {
-      // Update data-id attribute to the new resolved c.us JID
       checkbox.setAttribute('data-id', data.targetJid);
       
-      // Update displayed name or detail inside parent row
       const parentRow = checkbox.closest('.wa-chat-item');
       if (parentRow) {
-        // Update display number in .wa-chat-details
         const detailsDiv = parentRow.querySelector('.wa-chat-details');
         if (detailsDiv) {
           detailsDiv.innerText = data.displayId;
         }
         
-        // Update wa-chat-name title and innerText if it was using cleanId
         const nameDiv = parentRow.querySelector('.wa-chat-name');
         if (nameDiv && nameDiv.innerText === lidJid.split('@')[0]) {
           nameDiv.innerText = nameDiv.title || data.displayId;
@@ -1000,7 +1308,6 @@ socket.on('chats_resolved', (updates) => {
       }
     });
 
-    // Also update selection states if they checked it while resolving
     if (selectedChats.has(lidJid)) {
       selectedChats.delete(lidJid);
       selectedChats.add(data.targetJid);
@@ -1014,3 +1321,5 @@ socket.on('chats_resolved', (updates) => {
 loadTemplates();
 loadReports();
 loadBlacklist();
+initChart();
+updateAckUI();

@@ -271,6 +271,52 @@ const replaceName = (message, name) => {
 };
 
 /**
+ * Replace custom variables in message
+ * @param {string} message - Message template
+ * @param {Object|string|null} variables - Variables object or JSON string
+ * @returns {string} - Message with replaced variables
+ */
+const replaceCustomVariables = (message, variables) => {
+  if (!variables) return message;
+
+  let vars = {};
+  if (typeof variables === 'string') {
+    try {
+      vars = JSON.parse(variables);
+    } catch (e) {
+      logger.error('Error parsing variables JSON:', e);
+      return message;
+    }
+  } else if (typeof variables === 'object') {
+    vars = variables;
+  }
+
+  let result = message;
+
+  // Replace each variable placeholder {key} with its value (case-insensitive key matching)
+  result = result.replace(/\{([^{}]+)\}/g, (match, key) => {
+    // Check if the key exists in our vars (exact match)
+    const exactValue = vars[key];
+    if (exactValue !== undefined && exactValue !== null) {
+      return exactValue;
+    }
+
+    // Check case-insensitively
+    const lowerKey = key.toLowerCase();
+    const foundKey = Object.keys(vars).find(k => k.toLowerCase() === lowerKey);
+    if (foundKey) {
+      const val = vars[foundKey];
+      return val !== undefined && val !== null ? val : '';
+    }
+
+    // If not found in vars, return the original match (e.g. spintax or dynamic vars)
+    return match;
+  });
+
+  return result;
+};
+
+/**
  * Format statistics
  * @param {Object} stats - Statistics object
  * @returns {string} - Formatted statistics
@@ -368,6 +414,7 @@ module.exports = {
   ensureDirectories,
   parseNumberLine,
   replaceName,
+  replaceCustomVariables,
   formatStatistics,
   processSpintax,
   addEmojiVariation,

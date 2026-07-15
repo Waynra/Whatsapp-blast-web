@@ -1,8 +1,10 @@
 const path = require('path');
 const config = require('./config');
 const logger = require('./logger');
+const db = require('./db');
 const {
   replaceName,
+  replaceCustomVariables,
   applyMessageVariations,
   writeReport,
   sleep
@@ -50,7 +52,7 @@ class WebBlastManager {
     return false;
   }
 
-  async startCampaign(data, options) {
+  async startCampaign(campaignId, data, options) {
     if (this.isRunning) {
       throw new Error('A campaign is already running');
     }
@@ -59,14 +61,41 @@ class WebBlastManager {
     this.isPaused = false;
     this.isCancelled = false;
     this.statistics = { success: 0, failed: 0 };
-    
-    const { numbers, textTemplate, textFileName = 'web-text', numberFileName = 'web-number' } = data;
-    const { delay = 3000, sleepAfter = 0, sleepDuration = 0, messageVariation = {} } = options;
 
-    logger.info(`Starting Web Blast Campaign: ${numbers.length} recipients`);
+    // Fetch campaign and recipients from SQLite
+    const campaign = await db.dbGet('SELECT * FROM campaigns WHERE id = ?', [campaignId]);
+    if (!campaign) {
+      this.isRunning = false;
+      throw new Error(`Campaign ID ${campaignId} not found in database`);
+    }
+
+    const recipients = await db.dbAll('SELECT id, number, name, variables FROM recipients WHERE campaign_id = ?', [campaignId]);
+    if (recipients.length === 0) {
+      this.isRunning = false;
+      await db.updateCampaignStatus(campaignId, 'failed');
+      throw new Error(`No recipients found for Campaign ID ${campaignId}`);
+    }
+
+    const totalCount = recipients.length;
+    this.currentCampaign = { id: campaignId, total: totalCount };
+
+    const { textTemplate, textFileName = 'web-text', numberFileName = 'web-number' } = data;
+    const { 
+      delayMin = 3000, 
+      delayMax = 3000, 
+      sleepAfter = 0, 
+      sleepDuration = 0, 
+      messageVariation = {} 
+    } = options;
+
+    const mediaPath = campaign.media_path;
+    const mediaName = campaign.media_name;
+
+    logger.info(`Starting Web Blast Campaign ID ${campaignId}: ${totalCount} recipients. Media: ${mediaName || 'None'}`);
     this.io.emit('campaign_status', { 
       status: 'running', 
-      total: numbers.length,
+      campaignId,
+      total: totalCount,
       success: 0,
       failed: 0
     });
@@ -75,7 +104,10 @@ class WebBlastManager {
     const reportName = Date.now();
     let messageCount = 0;
 
-    for (let i = 0; i < numbers.length; i++) {
+    // Set campaign status to running
+    await db.updateCampaignStatus(campaignId, 'running');
+
+    for (let i = 0; i < recipients.length; i++) {
       // Handle Pause
       while (this.isPaused) {
         await sleep(1000);
@@ -83,50 +115,64 @@ class WebBlastManager {
 
       // Handle Cancel
       if (this.isCancelled) {
-        logger.info('Campaign execution cancelled by user');
+        logger.info(`Campaign ID ${campaignId} execution cancelled by user`);
         this.io.emit('campaign_log', { type: 'warn', message: 'Campaign execution cancelled by user' });
         break;
       }
 
-      const item = numbers[i];
+      const item = recipients[i];
       let message = replaceName(textTemplate, item.name);
+      if (item.variables) {
+        message = replaceCustomVariables(message, item.variables);
+      }
       message = applyMessageVariations(message, messageVariation);
 
       this.io.emit('campaign_log', { 
         type: 'info', 
-        message: `[${i + 1}/${numbers.length}] Sending to ${item.number} (${item.name || 'N/A'})...` 
+        message: `[${i + 1}/${totalCount}] Sending to ${item.number} (${item.name || 'N/A'})...` 
       });
 
-      const result = await this.client.sendMessage(item.number, message);
+      // Send via WhatsApp Client
+      const result = await this.client.sendMessage(item.number, message, mediaPath);
 
       if (result.success) {
         this.statistics.success++;
+        await db.updateRecipientStatus(item.id, 'success', null, result.msgId);
+        
         reportContent.push(`${item.number} | SUCCESS | ${item.name || 'N/A'}`);
         this.io.emit('campaign_log', { 
           type: 'success', 
-          message: `✓ Success: ${item.number}` 
+          message: `✓ Success: ${item.number}`,
+          recipientId: item.id,
+          msgId: result.msgId
         });
       } else {
         this.statistics.failed++;
+        await db.updateRecipientStatus(item.id, 'failed', result.error || 'Unknown error');
+        
         reportContent.push(`${item.number} | FAILED | ${item.name || 'N/A'} | ${result.error || 'Unknown error'}`);
         this.io.emit('campaign_log', { 
           type: 'error', 
-          message: `✗ Failed: ${item.number} - ${result.error || 'Unknown error'}` 
+          message: `✗ Failed: ${item.number} - ${result.error || 'Unknown error'}`,
+          recipientId: item.id
         });
       }
 
       // Emit real-time progress
       this.io.emit('campaign_progress', {
         index: i + 1,
-        total: numbers.length,
+        total: totalCount,
         success: this.statistics.success,
         failed: this.statistics.failed
       });
 
-      // Delay between messages
-      if (i < numbers.length - 1 && !this.isCancelled) {
+      // Randomized Delay (Jitter) between messages
+      if (i < recipients.length - 1 && !this.isCancelled) {
+        // Calculate random delay between min and max
+        const randomDelay = Math.floor(Math.random() * (delayMax - delayMin + 1)) + delayMin;
+        
         const startDelay = Date.now();
-        while (Date.now() - startDelay < delay) {
+        while (Date.now() - startDelay < randomDelay) {
           if (this.isCancelled) break;
           while (this.isPaused) {
             await sleep(500);
@@ -138,7 +184,7 @@ class WebBlastManager {
       // Sleep intervals
       if (sleepAfter > 0 && !this.isCancelled) {
         messageCount++;
-        if (messageCount >= sleepAfter && i < numbers.length - 1) {
+        if (messageCount >= sleepAfter && i < recipients.length - 1) {
           logger.info(`Campaign sleeping for ${sleepDuration}ms after ${sleepAfter} messages...`);
           this.io.emit('campaign_log', { 
             type: 'sleep', 
@@ -159,6 +205,10 @@ class WebBlastManager {
       }
     }
 
+    // Mark campaign as finished/cancelled in DB
+    const finalStatus = this.isCancelled ? 'cancelled' : 'finished';
+    await db.updateCampaignStatus(campaignId, finalStatus);
+
     // Save report
     const reportPath = path.join(
       config.directories.report,
@@ -168,10 +218,10 @@ class WebBlastManager {
     reportContent.push('\n' + '='.repeat(50));
     reportContent.push('WEB BLAST STATISTICS');
     reportContent.push('='.repeat(50));
-    reportContent.push(`Total: ${numbers.length}`);
+    reportContent.push(`Total: ${totalCount}`);
     reportContent.push(`Success: ${this.statistics.success}`);
     reportContent.push(`Failed: ${this.statistics.failed}`);
-    reportContent.push(`Success Rate: ${((this.statistics.success / numbers.length) * 100).toFixed(2)}%`);
+    reportContent.push(`Success Rate: ${((this.statistics.success / totalCount) * 100).toFixed(2)}%`);
 
     writeReport(reportPath, reportContent);
 
@@ -181,10 +231,10 @@ class WebBlastManager {
     });
 
     this.io.emit('campaign_status', { 
-      status: this.isCancelled ? 'cancelled' : 'finished',
+      status: finalStatus,
       success: this.statistics.success,
       failed: this.statistics.failed,
-      total: numbers.length,
+      total: totalCount,
       reportFile: `${reportName}-${textFileName}-${numberFileName}.txt`
     });
 

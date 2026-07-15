@@ -1,9 +1,10 @@
 const EventEmitter = require('events');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 const logger = require('./logger');
 const { formatPhoneNumber, isValidPhoneNumber, sleep } = require('./utils');
+const db = require('./db');
 
 class WhatsAppClient extends EventEmitter {
   constructor() {
@@ -78,13 +79,16 @@ class WhatsAppClient extends EventEmitter {
       this.emit('change_state', state);
     });
 
+    this.client.on('message_ack', (msg, ack) => {
+      this.emit('message_ack', { msgId: msg.id._serialized, ack });
+    });
+
     this.client.on('message', async (msg) => {
       try {
         const body = (msg.body || '').trim().toUpperCase();
         if (body === 'STOP' && msg.from.endsWith('@c.us')) {
           const senderNum = msg.from.split('@')[0];
-          const { addToBlacklist } = require('./utils');
-          const added = addToBlacklist(senderNum);
+          const added = await db.addToBlacklist(senderNum, 'Opt-Out via STOP message');
           
           if (added) {
             logger.info(`Number auto-blacklisted from incoming STOP message: ${senderNum}`);
@@ -112,9 +116,10 @@ class WhatsAppClient extends EventEmitter {
    * Send message to a phone number with retry mechanism
    * @param {string} number - Phone number
    * @param {string} message - Message to send
-   * @returns {Promise<{success: boolean, error?: string}>}
+   * @param {string|null} mediaPath - Path to media attachment file
+   * @returns {Promise<{success: boolean, error?: string, msgId?: string}>}
    */
-  async sendMessage(number, message) {
+  async sendMessage(number, message, mediaPath = null) {
     let targetJid = number;
 
     // Safety cleanup: If number has double @c.us or mixed JIDs
@@ -143,9 +148,8 @@ class WhatsAppClient extends EventEmitter {
       targetJid = formattedNumber;
     }
 
-    // Check Blacklist
-    const { getBlacklist } = require('./utils');
-    const blacklist = getBlacklist();
+    // Check Blacklist from DB
+    const blacklist = await db.getBlacklist();
     
     // Extract raw digits for blacklist checking
     const cleanNumber = typeof number === 'string' ? number.split('@')[0] : number;
@@ -180,11 +184,32 @@ class WhatsAppClient extends EventEmitter {
           finalJid = numberId._serialized;
         }
 
-        // Send message
-        await this.client.sendMessage(finalJid, message);
+        // Simulate Typing status for realistic human behavior
+        try {
+          const chat = await this.client.getChatById(finalJid);
+          if (chat) {
+            await chat.sendStateTyping();
+            await sleep(1500); // Simulate typing for 1.5 seconds
+          }
+        } catch (typingErr) {
+          logger.debug(`Could not set typing state: ${typingErr.message}`);
+        }
+
+        // Send message with or without media
+        let sentMessage;
+        if (mediaPath) {
+          const media = MessageMedia.fromFilePath(mediaPath);
+          sentMessage = await this.client.sendMessage(finalJid, media, { caption: message });
+        } else {
+          sentMessage = await this.client.sendMessage(finalJid, message);
+        }
+
         logger.info(`Message sent successfully to: ${number}`);
         
-        return { success: true };
+        return { 
+          success: true, 
+          msgId: sentMessage && sentMessage.id ? sentMessage.id._serialized : null 
+        };
 
       } catch (error) {
         lastError = error;
@@ -242,7 +267,16 @@ class WhatsAppClient extends EventEmitter {
             }
             // Sort by timestamp descending and take the top 150 chats
             const allChats = window.Store.Chat.models || [];
-            const sorted = [...allChats].sort((a, b) => (b.t || 0) - (a.t || 0));
+            const sorted = [...allChats]
+              .filter(chat => {
+                if (!chat.id) return false;
+                const serialized = chat.id._serialized;
+                const user = chat.id.user;
+                if (!serialized.endsWith('@c.us') && !serialized.endsWith('@g.us')) return false;
+                if (user && user.startsWith('1') && user.length >= 13) return false; // Abaikan nomor LID
+                return true;
+              })
+              .sort((a, b) => (b.t || 0) - (a.t || 0));
             return sorted.slice(0, 150).map(chat => {
               return {
                 id: chat.id._serialized,
@@ -265,7 +299,15 @@ class WhatsAppClient extends EventEmitter {
       // If fast evaluation returned null/empty, use standard getChats
       if (!chats || chats.length === 0) {
         const rawChats = await this.client.getChats();
-        chats = rawChats.map(chat => {
+        const filteredChats = rawChats.filter(chat => {
+          if (!chat.id) return false;
+          const serialized = chat.id._serialized;
+          const user = chat.id.user;
+          if (!serialized.endsWith('@c.us') && !serialized.endsWith('@g.us')) return false;
+          if (user && user.startsWith('1') && user.length >= 13) return false; // Abaikan nomor LID
+          return true;
+        });
+        chats = filteredChats.map(chat => {
           return {
             id: chat.id._serialized,
             name: chat.name,
@@ -313,6 +355,64 @@ class WhatsAppClient extends EventEmitter {
       return chats;
     } catch (error) {
       logger.error('Error fetching active chats:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get all phonebook contacts from WhatsApp
+   * @returns {Promise<Array>}
+   */
+  async getPhonebookContacts() {
+    if (!this.isReady) {
+      logger.warn('Cannot fetch contacts, WhatsApp client is not ready');
+      return [];
+    }
+    try {
+      logger.info('Fetching phonebook contacts...');
+      const contacts = await this.client.getContacts();
+      
+      const seen = new Set();
+      const uniqueContacts = [];
+
+      for (const contact of contacts) {
+        // 1. Validasi tipe kontak: harus berupa user (@c.us), bukan me, dan bukan JID ngawur
+        if (!contact.isUser || contact.isMe || !contact.id || !contact.id._serialized) continue;
+        if (!contact.id._serialized.endsWith('@c.us')) continue; // buang @lid, @g.us, dll
+        
+        // 2. Bersihkan nomor telepon dan periksa validitas panjangnya
+        const phone = contact.number ? contact.number.replace(/\D/g, '') : '';
+        if (phone.length < 9 || phone.length > 15) continue; // nomor harus valid (9-15 digit)
+        if (phone.startsWith('1') && phone.length >= 13) continue; // Abaikan nomor LID (Linked Identity)
+
+        // 3. Hanya tampilkan kontak yang memilik nama terdaftar di HP (kontak tersimpan asli)
+        const isSaved = contact.isMyContact || (contact.name && contact.name.trim() !== '');
+        if (!isSaved) continue;
+
+        const name = (contact.name || contact.pushname || '').trim();
+        if (!name) continue;
+
+        // 4. Eliminasi duplikat berdasarkan nomor telepon
+        if (seen.has(phone)) continue;
+        seen.add(phone);
+
+        uniqueContacts.push({
+          id: contact.id._serialized,
+          name: name,
+          isGroup: false,
+          unreadCount: 0,
+          timestamp: 0,
+          displayId: phone
+        });
+      }
+
+      // Urutkan berdasarkan nama agar rapi secara alfabetis
+      uniqueContacts.sort((a, b) => a.name.localeCompare(b.name));
+
+      logger.info(`Fetched and filtered ${uniqueContacts.length} unique phonebook contacts.`);
+      return uniqueContacts;
+    } catch (error) {
+      logger.error('Error fetching phonebook contacts:', error);
       return [];
     }
   }

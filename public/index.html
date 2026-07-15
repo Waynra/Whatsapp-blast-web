@@ -126,8 +126,30 @@
               <label for="messageTemplate">Template Pesan</label>
               <textarea id="messageTemplate" placeholder="Tulis pesan Anda disini...
 Gunakan {name} untuk personalisasi nama.
+Gunakan {NamaKolom} untuk mengambil variabel kustom dari Excel (misal: {Tagihan}, {Invoice}, dll).
 Gunakan spintax: {Halo|Hai|Hi} untuk variasi kata.
 Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
+            </div>
+
+            <!-- CRUD Template Actions -->
+            <div class="template-actions" style="margin-top: 10px; display: flex; gap: 10px; margin-bottom: 15px;">
+              <input type="text" id="templateNameInput" placeholder="Nama template..." style="flex: 1; padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-card); background: rgba(255, 255, 255, 0.05); color: var(--text-main); font-size: 0.9rem;">
+              <button class="btn btn-info btn-sm" id="btnSaveTemplate" type="button" style="padding: 6px 12px;"><i class="fa-solid fa-floppy-disk"></i> Simpan</button>
+              <button class="btn btn-danger btn-sm" id="btnDeleteTemplate" type="button" style="padding: 6px 12px;" disabled><i class="fa-solid fa-trash"></i> Hapus</button>
+            </div>
+
+            <!-- Upload Media Attachment -->
+            <div class="form-group" style="margin-bottom: 20px;">
+              <label><i class="fa-solid fa-paperclip"></i> Lampiran Media (Opsional)</label>
+              <div class="media-drop-zone" id="mediaDropZone" style="border: 2px dashed var(--border-card); padding: 15px; border-radius: var(--radius-md); text-align: center; cursor: pointer; transition: var(--transition); background: rgba(255, 255, 255, 0.02);">
+                <i class="fa-solid fa-file-image" style="font-size: 1.8rem; color: var(--text-muted); margin-bottom: 8px;"></i>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">Klik/Seret file gambar, PDF, atau dokumen disini</p>
+                <input type="file" id="mediaFileInput" accept="image/*,application/pdf,video/*" style="display: none;">
+              </div>
+              <div id="mediaUploadFeedback" class="upload-feedback" style="display: none; margin-top: 8px; font-size: 0.85rem; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.2);">
+                <i class="fa-solid fa-circle-check" style="color: var(--color-primary); margin-right: 5px;"></i> Terlampir: <strong id="attachedMediaName">file.png</strong>
+                <button type="button" id="btnRemoveMedia" style="background: transparent; border: none; color: var(--color-danger); cursor: pointer; margin-left: 10px; font-size: 0.8rem;"><i class="fa-solid fa-times"></i> Hapus</button>
+              </div>
             </div>
 
             <!-- TABS FOR CONTACT SELECTION -->
@@ -150,8 +172,8 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
                   <label>Upload File Kontak</label>
                   <div class="file-drop-zone" id="fileDropZone">
                     <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                    <p>Drag & drop file <code>.txt</code> kontak Anda disini atau klik untuk mencari</p>
-                    <input type="file" id="contactsFileInput" accept=".txt" style="display: none;">
+                    <p>Drag & drop file <code>.txt</code>, <code>.xlsx</code>, atau <code>.csv</code> kontak Anda disini atau klik untuk mencari</p>
+                    <input type="file" id="contactsFileInput" accept=".txt,.xlsx,.xls,.csv" style="display: none;">
                   </div>
                   <div id="uploadFeedback" class="upload-feedback" style="display: none;">
                     <i class="fa-solid fa-circle-check text-success"></i> File <strong id="uploadedFileName">kontak.txt</strong> berhasil diupload (<span id="contactsCount">0</span> nomor terdeteksi).
@@ -180,6 +202,7 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
                     <button class="filter-pill active" id="filterAll" type="button">Semua</button>
                     <button class="filter-pill" id="filterPrivate" type="button">Pribadi</button>
                     <button class="filter-pill" id="filterGroups" type="button">Grup</button>
+                    <button class="filter-pill" id="filterPhonebook" type="button">Buku Kontak</button>
                   </div>
                 </div>
 
@@ -227,10 +250,17 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
             <h2><i class="fa-solid fa-sliders"></i> Pengaturan Kampanye</h2>
 
             <div class="settings-grid">
-              <div class="form-group">
-                <label for="delay">Delay Antar Pesan (detik)</label>
-                <input type="number" id="delay" value="10" min="2" max="60">
-                <small class="form-help">Waktu tunggu sebelum pesan berikutnya dikirim. Minimal 2 detik (direkomendasikan: 5-10 detik).</small>
+              <!-- Randomized Jitter Delay min/max -->
+              <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                  <label for="delayMin">Delay Min (detik)</label>
+                  <input type="number" id="delayMin" value="5" min="2" max="60">
+                </div>
+                <div>
+                  <label for="delayMax">Delay Max (detik)</label>
+                  <input type="number" id="delayMax" value="10" min="2" max="60">
+                </div>
+                <small class="form-help" style="grid-column: span 2;">Waktu tunggu acak antar pesan (jitter) agar terlihat manusiawi.</small>
               </div>
 
               <div class="form-group">
@@ -246,7 +276,16 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
               </div>
             </div>
 
-            <div class="variations-section">
+            <!-- Campaign Scheduler (Jadwal Kirim) -->
+            <div class="scheduler-section" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-card);">
+              <h3><i class="fa-solid fa-clock"></i> Jadwalkan Pengiriman (Opsional)</h3>
+              <div class="form-group" style="margin-top: 10px;">
+                <input type="datetime-local" id="scheduledTimeInput" style="width: 100%; padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-card); background: rgba(255, 255, 255, 0.05); color: var(--text-main);">
+                <small class="form-help">Kosongkan jika ingin langsung mengirim pesan sekarang.</small>
+              </div>
+            </div>
+
+            <div class="variations-section" style="margin-top: 15px;">
               <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Variasi Pesan Anti-Banned</h3>
               <div class="checkbox-group">
                 <label class="checkbox-container">
@@ -277,7 +316,7 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
               </div>
             </div>
 
-            <div class="action-buttons-wrapper">
+            <div class="action-buttons-wrapper" style="margin-top: 20px;">
               <button class="btn btn-success btn-lg btn-block" id="btnStartCampaign" disabled>
                 <i class="fa-solid fa-paper-plane"></i> Mulai Blast Kampanye
               </button>
@@ -312,7 +351,22 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
             </div>
             <div class="stat-box">
               <div class="stat-val" id="statPercentage">0%</div>
-              <div class="stat-lbl">Presentase</div>
+              <div class="stat-lbl">Persentase</div>
+            </div>
+          </div>
+
+          <!-- Visual Analytics Chart & Read Receipts Legend -->
+          <div class="campaign-analytics-row" style="display: grid; grid-template-columns: 180px 1fr; gap: 20px; margin: 20px 0; align-items: center;">
+            <div class="chart-container" style="position: relative; height: 180px; width: 180px; margin: 0 auto;">
+              <canvas id="campaignChart"></canvas>
+            </div>
+            <div class="ack-legend-box" style="display: flex; flex-direction: column; gap: 10px; justify-content: center; background: rgba(255, 255, 255, 0.02); padding: 15px; border-radius: var(--radius-md); border: 1px solid var(--border-card);">
+              <div style="font-weight: 600; font-size: 0.9rem; margin-bottom: 5px;"><i class="fa-solid fa-square-poll-vertical"></i> Pelacakan Penerimaan (Read Receipts)</div>
+              <div style="display: flex; gap: 15px; flex-wrap: wrap; font-size: 0.85rem;">
+                <div><i class="fa-solid fa-check" style="color: var(--text-muted);"></i> Sent: <strong id="legendSent">0</strong></div>
+                <div><i class="fa-solid fa-check-double" style="color: var(--text-muted);"></i> Delivered: <strong id="legendDelivered">0</strong></div>
+                <div><i class="fa-solid fa-check-double" style="color: #00f2fe;"></i> Read: <strong id="legendRead">0</strong></div>
+              </div>
             </div>
           </div>
 
@@ -343,6 +397,8 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <!-- Socket.io -->
   <script src="/socket.io/socket.io.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Main Script -->
   <script src="app.js"></script>
 </body>

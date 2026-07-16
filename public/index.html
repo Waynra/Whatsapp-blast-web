@@ -140,15 +140,14 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
 
             <!-- Upload Media Attachment -->
             <div class="form-group" style="margin-bottom: 20px;">
-              <label><i class="fa-solid fa-paperclip"></i> Lampiran Media (Opsional)</label>
+              <label><i class="fa-solid fa-paperclip"></i> Lampiran Gambar (Opsional, Maks 3 Gambar)</label>
               <div class="media-drop-zone" id="mediaDropZone" style="border: 2px dashed var(--border-card); padding: 15px; border-radius: var(--radius-md); text-align: center; cursor: pointer; transition: var(--transition); background: rgba(255, 255, 255, 0.02);">
                 <i class="fa-solid fa-file-image" style="font-size: 1.8rem; color: var(--text-muted); margin-bottom: 8px;"></i>
-                <p style="font-size: 0.85rem; color: var(--text-muted);">Klik/Seret file gambar, PDF, atau dokumen disini</p>
-                <input type="file" id="mediaFileInput" accept="image/*,application/pdf,video/*" style="display: none;">
+                <p style="font-size: 0.85rem; color: var(--text-muted);">Klik/Seret file gambar di sini (bisa pilih hingga 3 gambar)</p>
+                <input type="file" id="mediaFileInput" accept="image/*" style="display: none;" multiple>
               </div>
-              <div id="mediaUploadFeedback" class="upload-feedback" style="display: none; margin-top: 8px; font-size: 0.85rem; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.2);">
-                <i class="fa-solid fa-circle-check" style="color: var(--color-primary); margin-right: 5px;"></i> Terlampir: <strong id="attachedMediaName">file.png</strong>
-                <button type="button" id="btnRemoveMedia" style="background: transparent; border: none; color: var(--color-danger); cursor: pointer; margin-left: 10px; font-size: 0.8rem;"><i class="fa-solid fa-times"></i> Hapus</button>
+              <div id="mediaUploadFeedback" class="upload-feedback" style="display: none; margin-top: 8px; font-size: 0.85rem; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.2); flex-direction: column; gap: 8px;">
+                <!-- Akan diisi secara dinamis oleh JavaScript -->
               </div>
             </div>
 
@@ -254,18 +253,21 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
               <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                 <div>
                   <label for="delayMin">Delay Min (detik)</label>
-                  <input type="number" id="delayMin" value="5" min="2" max="60">
+                  <input type="number" id="delayMin" value="10" min="3" max="120">
                 </div>
                 <div>
                   <label for="delayMax">Delay Max (detik)</label>
-                  <input type="number" id="delayMax" value="10" min="2" max="60">
+                  <input type="number" id="delayMax" value="20" min="5" max="120">
                 </div>
-                <small class="form-help" style="grid-column: span 2;">Waktu tunggu acak antar pesan (jitter) agar terlihat manusiawi.</small>
+                <div style="grid-column: span 2; display: flex; align-items: center; gap: 8px; margin-top: 2px; margin-bottom: 5px;">
+                  <span id="safetyIndicator" style="font-size: 0.75rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; transition: var(--transition);">Menghitung...</span>
+                  <small class="form-help" style="margin: 0;">Jeda acak agar terlihat alami oleh sistem WhatsApp.</small>
+                </div>
               </div>
 
               <div class="form-group">
                 <label for="sleepAfter">Sleep Setiap (jumlah pesan)</label>
-                <input type="number" id="sleepAfter" value="50" min="0">
+                <input type="number" id="sleepAfter" value="25" min="0">
                 <small class="form-help">Jeda panjang setelah mengirim sejumlah pesan. Isi 0 untuk menonaktifkan.</small>
               </div>
 

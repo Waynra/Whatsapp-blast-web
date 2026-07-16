@@ -24,6 +24,11 @@ class WhatsAppClient extends EventEmitter {
       authStrategy: new LocalAuth({
         dataPath: config.whatsapp.sessionPath
       }),
+      webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
+        strict: false
+      },
       puppeteer: {
         headless: config.whatsapp.headlessMode,
         args: [
@@ -184,12 +189,17 @@ class WhatsAppClient extends EventEmitter {
           finalJid = numberId._serialized;
         }
 
-        // Simulate Typing status for realistic human behavior
+        // Simulate Typing status for realistic human behavior (proportional to message length with random jitter)
         try {
           const chat = await this.client.getChatById(finalJid);
           if (chat) {
             await chat.sendStateTyping();
-            await sleep(1500); // Simulate typing for 1.5 seconds
+            // Estimate human typing speed: scale duration based on message length (12ms per char), between 1.5s and 6s
+            const baseTypingMs = Math.min(6000, Math.max(1500, (message || '').length * 12));
+            // Add jitter of +/- 500ms
+            const jitterMs = Math.floor(Math.random() * 1000) - 500;
+            const typingTime = Math.max(1000, baseTypingMs + jitterMs);
+            await sleep(typingTime);
           }
         } catch (typingErr) {
           logger.debug(`Could not set typing state: ${typingErr.message}`);
@@ -198,8 +208,39 @@ class WhatsAppClient extends EventEmitter {
         // Send message with or without media
         let sentMessage;
         if (mediaPath) {
-          const media = MessageMedia.fromFilePath(mediaPath);
-          sentMessage = await this.client.sendMessage(finalJid, media, { caption: message });
+          let paths = [];
+          if (Array.isArray(mediaPath)) {
+            paths = mediaPath;
+          } else if (typeof mediaPath === 'string' && mediaPath.trim().startsWith('[')) {
+            try {
+              paths = JSON.parse(mediaPath);
+            } catch (e) {
+              paths = [mediaPath];
+            }
+          } else {
+            paths = [mediaPath];
+          }
+
+          if (paths.length > 0) {
+            // Send the first media with the caption
+            const media = MessageMedia.fromFilePath(paths[0]);
+            sentMessage = await this.client.sendMessage(finalJid, media, { caption: message });
+            
+            // Send the remaining media files
+            for (let j = 1; j < paths.length; j++) {
+              try {
+                // Add randomized delay between consecutive media (1s - 3.5s) to avoid robotic delivery triggers
+                const mediaDelay = 1000 + Math.floor(Math.random() * 2500);
+                await sleep(mediaDelay);
+                const extraMedia = MessageMedia.fromFilePath(paths[j]);
+                await this.client.sendMessage(finalJid, extraMedia);
+              } catch (extraMediaErr) {
+                logger.warn(`Failed to send additional media ${paths[j]} to ${number}: ${extraMediaErr.message}`);
+              }
+            }
+          } else {
+            sentMessage = await this.client.sendMessage(finalJid, message);
+          }
         } else {
           sentMessage = await this.client.sendMessage(finalJid, message);
         }
@@ -256,48 +297,47 @@ class WhatsAppClient extends EventEmitter {
     try {
       logger.info('Fetching active chats...');
       
-      // Try fast custom page evaluation first
       let chats = [];
       const page = this.client.pupPage || this.client.page;
       if (page) {
         try {
           chats = await page.evaluate(() => {
-            if (typeof window.Store === 'undefined' || !window.Store.Chat) {
+            if (typeof window.require === 'undefined') return null;
+            try {
+              const collections = window.require('WAWebCollections');
+              if (!collections || !collections.Chat) return null;
+              
+              const rawChats = collections.Chat.getModelsArray() || [];
+              return rawChats.map(chat => {
+                const serializedId = chat.id ? (chat.id._serialized || chat.id) : '';
+                const cleanId = serializedId.split('@')[0];
+                const displayId = chat.id ? (chat.id.user || cleanId) : cleanId;
+                
+                // If it is a LID chat, we default displayId to cleanId
+                return {
+                  id: serializedId,
+                  name: chat.name || displayId,
+                  isGroup: chat.isGroup || false,
+                  unreadCount: chat.unreadCount || 0,
+                  timestamp: chat.t || 0,
+                  displayId: displayId
+                };
+              });
+            } catch (evalErr) {
               return null;
             }
-            // Sort by timestamp descending and take the top 150 chats
-            const allChats = window.Store.Chat.models || [];
-            const sorted = [...allChats]
-              .filter(chat => {
-                if (!chat.id) return false;
-                const serialized = chat.id._serialized;
-                const user = chat.id.user;
-                if (!serialized.endsWith('@c.us') && !serialized.endsWith('@g.us')) return false;
-                if (user && user.startsWith('1') && user.length >= 13) return false; // Abaikan nomor LID
-                return true;
-              })
-              .sort((a, b) => (b.t || 0) - (a.t || 0));
-            return sorted.slice(0, 150).map(chat => {
-              return {
-                id: chat.id._serialized,
-                name: chat.name || '',
-                isGroup: chat.isGroup || false,
-                unreadCount: chat.unreadCount || 0,
-                timestamp: chat.t || 0,
-                displayId: chat.id.user
-              };
-            });
           });
           if (chats) {
-            logger.info(`Successfully fetched ${chats.length} active chats via fast evaluation.`);
+            logger.info(`Successfully fetched ${chats.length} active chats via custom page evaluation.`);
           }
         } catch (evalErr) {
-          logger.warn('Fast chat evaluation failed, falling back to standard getChats:', evalErr.message);
+          logger.warn('Custom chat evaluation failed, falling back to standard getChats:', evalErr.message);
         }
       }
 
-      // If fast evaluation returned null/empty, use standard getChats
+      // Fallback to standard getChats only if custom evaluation returned null/empty
       if (!chats || chats.length === 0) {
+        logger.info('Falling back to standard getChats...');
         const rawChats = await this.client.getChats();
         const filteredChats = rawChats.filter(chat => {
           if (!chat.id) return false;
@@ -308,20 +348,56 @@ class WhatsAppClient extends EventEmitter {
           return true;
         });
         chats = filteredChats.map(chat => {
+          const cleanId = chat.id._serialized.split('@')[0];
+          const displayId = chat.id.user || cleanId;
           return {
             id: chat.id._serialized,
-            name: chat.name,
+            name: chat.name || displayId,
             isGroup: chat.isGroup,
             unreadCount: chat.unreadCount || 0,
             timestamp: chat.timestamp || 0,
-            displayId: chat.id.user
+            displayId: displayId
           };
         });
       }
 
-      // Resolve LIDs to phone numbers in the background
+      // Resolve LIDs to phone numbers inline first
+      const lidChats = chats.filter(chat => {
+        if (!chat.id) return false;
+        const cleanId = chat.id.split('@')[0];
+        return chat.id.endsWith('@lid') || (chat.id.endsWith('@c.us') && cleanId.startsWith('1') && cleanId.length >= 13);
+      });
+
+      if (lidChats.length > 0) {
+        logger.info(`Resolving ${lidChats.length} LIDs inline...`);
+        await Promise.all(lidChats.map(async (chat) => {
+          try {
+            const contact = await this.client.getContactById(chat.id);
+            if (contact && contact.number) {
+              const prevId = chat.id;
+              chat.displayId = contact.number;
+              chat.id = `${contact.number}@c.us`;
+              
+              // If name was the raw LID (or empty), update it to contact's name or number
+              const contactName = (contact.name || contact.pushname || '').trim();
+              if (!chat.name || chat.name === prevId.split('@')[0]) {
+                chat.name = contactName || contact.number;
+              }
+              logger.info(`Resolved LID inline: ${prevId} -> ${chat.id} (${chat.name})`);
+            }
+          } catch (err) {
+            logger.debug(`Could not resolve LID ${chat.id} inline: ${err.message}`);
+          }
+        }));
+      }
+
+      // Resolve LIDs to phone numbers in the background (as a fallback or for dynamically fetched ones)
       const lidIds = chats
-        .filter(chat => chat.id && chat.id.endsWith('@lid'))
+        .filter(chat => {
+          if (!chat.id) return false;
+          const cleanId = chat.id.split('@')[0];
+          return chat.id.endsWith('@lid') || (chat.id.endsWith('@c.us') && cleanId.startsWith('1') && cleanId.length >= 13);
+        })
         .map(chat => chat.id);
       
       if (lidIds.length > 0) {
@@ -334,13 +410,15 @@ class WhatsAppClient extends EventEmitter {
             try {
               const contact = await this.client.getContactById(lidJid);
               if (contact && contact.number) {
+                const contactName = (contact.name || contact.pushname || '').trim();
                 updates[lidJid] = {
                   displayId: contact.number,
-                  targetJid: `${contact.number}@c.us`
+                  targetJid: `${contact.number}@c.us`,
+                  name: contactName || contact.number
                 };
               }
             } catch (err) {
-              logger.debug(`Could not resolve LID ${lidJid}: ${err.message}`);
+              logger.debug(`Could not resolve LID ${lidJid} in background: ${err.message}`);
             }
           }
           if (Object.keys(updates).length > 0) {
@@ -370,7 +448,44 @@ class WhatsAppClient extends EventEmitter {
     }
     try {
       logger.info('Fetching phonebook contacts...');
-      const contacts = await this.client.getContacts();
+      
+      let contacts = [];
+      const page = this.client.pupPage || this.client.page;
+      if (page) {
+        try {
+          contacts = await page.evaluate(() => {
+            if (typeof window.require === 'undefined') return null;
+            try {
+              const collections = window.require('WAWebCollections');
+              if (!collections || !collections.Contact) return null;
+              
+              const rawContacts = collections.Contact.getModelsArray() || [];
+              return rawContacts.map(c => {
+                const serialized = c.id ? (c.id._serialized || c.id) : null;
+                const user = c.id ? (c.id.user || '') : '';
+                return {
+                  id: serialized ? { _serialized: serialized, user: user } : null,
+                  isUser: typeof c.isUser === 'boolean' ? c.isUser : (serialized ? serialized.endsWith('@c.us') : false),
+                  isMe: c.isMe || false,
+                  number: c.number || user,
+                  isMyContact: c.isMyContact || false,
+                  name: c.name || '',
+                  pushname: c.pushname || ''
+                };
+              });
+            } catch (evalErr) {
+              return null;
+            }
+          });
+        } catch (e) {
+          logger.warn('Custom contact evaluation failed, falling back:', e.message);
+        }
+      }
+
+      if (!contacts || contacts.length === 0) {
+        logger.info('Falling back to standard getContacts...');
+        contacts = await this.client.getContacts();
+      }
       
       const seen = new Set();
       const uniqueContacts = [];
@@ -428,6 +543,27 @@ class WhatsAppClient extends EventEmitter {
       } catch (err) {
         logger.error('Error during client.logout():', err);
       }
+      
+      try {
+        logger.info('Destroying client to release file locks...');
+        await this.client.destroy();
+      } catch (destroyErr) {
+        logger.debug(`Client destroy error during logout: ${destroyErr.message}`);
+      }
+
+      // Force delete session path to ensure 100% clean session deletion
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(config.whatsapp.sessionPath)) {
+          // Add a tiny delay to ensure puppeteer has fully exited
+          await sleep(1000);
+          fs.rmSync(config.whatsapp.sessionPath, { recursive: true, force: true });
+          logger.info('Session folder cleared successfully.');
+        }
+      } catch (fsErr) {
+        logger.warn('Failed to force clean session directory:', fsErr.message);
+      }
+
       this.isReady = false;
     }
   }

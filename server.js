@@ -10,6 +10,15 @@ const xlsx = require('xlsx');
 
 const config = require('./config');
 const logger = require('./logger');
+
+// Prevent process crashes from unhandled rejections/exceptions (e.g., session folder locking during disconnect)
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at promise:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception thrown:', error);
+});
+
 const WhatsAppClient = require('./whatsapp');
 const WebBlastManager = require('./web-blast');
 const { ensureDirectories } = require('./utils');
@@ -28,7 +37,16 @@ const PORT = process.env.PORT || 3000;
 
 // Setup Multer for contacts and media
 const upload = multer({ dest: 'uploads/' });
-const mediaUpload = multer({ dest: 'uploads/media/' });
+const mediaStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/media/');
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+const mediaUpload = multer({ storage: mediaStorage });
 
 // Middleware
 app.use(cors());
@@ -260,11 +278,56 @@ app.delete('/api/blacklist/:number', async (req, res) => {
   }
 });
 
+// Clear all account data (reports, campaigns, recipients, uploaded media)
+async function clearAllAccountData() {
+  logger.info('Clearing all account-specific data (reports, database campaigns, uploaded media)...');
+  
+  // 1. Clear database tables
+  try {
+    await db.clearCampaignsAndRecipients();
+  } catch (err) {
+    logger.error('Error clearing db:', err);
+  }
+  
+  // 2. Clear campaign report files (.txt)
+  try {
+    const reportDir = config.directories.report;
+    if (fs.existsSync(reportDir)) {
+      const files = await fs.promises.readdir(reportDir);
+      for (const file of files) {
+        if (file.endsWith('.txt')) {
+          await fs.promises.unlink(path.join(reportDir, file));
+        }
+      }
+      logger.info('Campaign report files cleared.');
+    }
+  } catch (err) {
+    logger.error('Error clearing reports:', err);
+  }
+  
+  // 3. Clear uploaded media
+  try {
+    const mediaDir = 'uploads/media/';
+    if (fs.existsSync(mediaDir)) {
+      const files = await fs.promises.readdir(mediaDir);
+      for (const file of files) {
+        await fs.promises.unlink(path.join(mediaDir, file));
+      }
+      logger.info('Uploaded media files cleared.');
+    }
+  } catch (err) {
+    logger.error('Error clearing uploaded media:', err);
+  }
+}
+
 // Disconnect WhatsApp session
 app.post('/api/disconnect', async (req, res) => {
   try {
     logger.info('Disconnecting/Logging out WhatsApp client by user request...');
     await whatsappClient.logout();
+    
+    // Clear all account data (reports, database history, uploaded media)
+    await clearAllAccountData();
     
     // Create new instance and re-initialize
     whatsappClient = new WhatsAppClient();
@@ -380,6 +443,33 @@ app.post('/api/upload-media', mediaUpload.single('file'), (req, res) => {
     originalName: req.file.originalname,
     mimeType: req.file.mimetype
   });
+});
+
+// Delete media attachment file
+app.post('/api/delete-media', (req, res) => {
+  const { filePath } = req.body;
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: 'File path is required' });
+  }
+
+  // Security check: ensure the file is inside the uploads/media directory
+  const resolvedPath = path.resolve(filePath);
+  const mediaDir = path.resolve(path.join(__dirname, 'uploads', 'media'));
+
+  if (!resolvedPath.startsWith(mediaDir)) {
+    return res.status(403).json({ success: false, error: 'Access denied' });
+  }
+
+  try {
+    if (fs.existsSync(resolvedPath)) {
+      fs.unlinkSync(resolvedPath);
+      logger.info(`Deleted media file from API request: ${resolvedPath}`);
+    }
+    res.json({ success: true });
+  } catch (error) {
+    logger.error('Error deleting media file:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // Get list of templates (From DB)

@@ -292,8 +292,23 @@ const getCampaignStats = async (campaignId) => {
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
     FROM recipients
     WHERE campaign_id = ?
-  `;
+   `;
   return await dbGet(query, [campaignId]);
+};
+
+/**
+ * Clear all campaigns and recipients records
+ */
+const clearCampaignsAndRecipients = async () => {
+  try {
+    await dbRun('DELETE FROM recipients');
+    await dbRun('DELETE FROM campaigns');
+    logger.info('Database campaigns and recipients tables cleared.');
+    return true;
+  } catch (err) {
+    logger.error('Error clearing campaigns and recipients:', err);
+    throw err;
+  }
 };
 
 // Auto run initialization
@@ -302,6 +317,7 @@ initDatabase().catch(err => {
 });
 
 module.exports = {
+  clearCampaignsAndRecipients,
   db,
   dbRun,
   dbGet,

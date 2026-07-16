@@ -35,6 +35,39 @@ const delayMaxInput = document.getElementById('delayMax');
 const sleepAfterInput = document.getElementById('sleepAfter');
 const sleepDurationInput = document.getElementById('sleepDuration');
 const scheduledTimeInput = document.getElementById('scheduledTimeInput');
+const safetyIndicator = document.getElementById('safetyIndicator');
+
+function updateSafetyIndicator() {
+  if (!safetyIndicator || !delayMinInput || !delayMaxInput) return;
+  const min = parseInt(delayMinInput.value) || 0;
+  const max = parseInt(delayMaxInput.value) || 0;
+  const avg = (min + max) / 2;
+
+  if (avg < 5) {
+    safetyIndicator.innerText = '⚠️ Berbahaya';
+    safetyIndicator.style.background = 'rgba(239, 68, 68, 0.15)';
+    safetyIndicator.style.color = '#ef4444';
+    safetyIndicator.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+  } else if (avg < 15) {
+    safetyIndicator.innerText = '⚡ Risiko Sedang';
+    safetyIndicator.style.background = 'rgba(245, 158, 11, 0.15)';
+    safetyIndicator.style.color = '#f59e0b';
+    safetyIndicator.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+  } else {
+    safetyIndicator.innerText = '🛡️ Sangat Aman';
+    safetyIndicator.style.background = 'rgba(16, 185, 129, 0.15)';
+    safetyIndicator.style.color = '#10b981';
+    safetyIndicator.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+  }
+}
+
+// Initial update and event listeners
+if (delayMinInput && delayMaxInput) {
+  delayMinInput.addEventListener('input', updateSafetyIndicator);
+  delayMaxInput.addEventListener('input', updateSafetyIndicator);
+  updateSafetyIndicator();
+}
+
 
 const useSpintax = document.getElementById('useSpintax');
 const useDynamicVars = document.getElementById('useDynamicVars');
@@ -65,8 +98,6 @@ const reportList = document.getElementById('reportList');
 const mediaDropZone = document.getElementById('mediaDropZone');
 const mediaFileInput = document.getElementById('mediaFileInput');
 const mediaUploadFeedback = document.getElementById('mediaUploadFeedback');
-const attachedMediaName = document.getElementById('attachedMediaName');
-const btnRemoveMedia = document.getElementById('btnRemoveMedia');
 
 // Tab Selection Elements
 const tabUploadFile = document.getElementById('tabUploadFile');
@@ -99,7 +130,7 @@ let uploadedFileNameBackup = 'web-contacts'; // Backup for uploaded file name
 let currentStatus = { state: 'disconnected', ready: false };
 let isCampaignRunning = false;
 let manualNumbers = null; // Stored parsed numbers from manual input
-let uploadedMedia = null; // Store media file metadata
+let uploadedMediaFiles = []; // Store media files metadata
 
 // Active WA selection state
 let activeTab = 'upload'; // 'upload' or 'whatsapp'
@@ -296,16 +327,17 @@ async function loadReports() {
         reportList.innerHTML = '<li class="loading-item">Belum ada laporan</li>';
         return;
       }
-      data.reports.forEach(name => {
+      data.reports.forEach(report => {
+        const reportName = typeof report === 'object' ? report.name : report;
         const li = document.createElement('li');
         li.className = 'report-item';
         li.innerHTML = `
-          <span>${name}</span>
+          <span>${reportName}</span>
           <div style="display: flex; gap: 8px; align-items: center;">
-            <a href="/api/reports/${name}" class="btn-download-report" title="Unduh Laporan" download style="color: var(--color-primary); cursor: pointer;">
+            <a href="/api/reports/${reportName}" class="btn-download-report" title="Unduh Laporan" download style="color: var(--color-primary); cursor: pointer;">
               <i class="fa-solid fa-download"></i>
             </a>
-            <button class="btn-delete-report" data-name="${name}" title="Hapus Laporan" style="color: var(--text-muted); background: transparent; border: none; cursor: pointer; transition: var(--transition);">
+            <button class="btn-delete-report" data-name="${reportName}" title="Hapus Laporan" style="color: var(--text-muted); background: transparent; border: none; cursor: pointer; transition: var(--transition);">
               <i class="fa-solid fa-trash-can"></i>
             </button>
           </div>
@@ -314,7 +346,7 @@ async function loadReports() {
         // Add delete listener
         li.querySelector('.btn-delete-report').addEventListener('click', (e) => {
           e.stopPropagation();
-          deleteReport(name);
+          deleteReport(reportName);
         });
         
         reportList.appendChild(li);
@@ -452,9 +484,16 @@ async function handleFileUpload(file) {
 
 // 3.1 Media Attachment Drag-and-Drop and Click Handler
 mediaDropZone.addEventListener('click', () => mediaFileInput.click());
-mediaFileInput.addEventListener('change', (e) => {
+mediaFileInput.addEventListener('change', async (e) => {
   if (e.target.files.length > 0) {
-    handleMediaUpload(e.target.files[0]);
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      if (uploadedMediaFiles.length >= 3) {
+        alert('Maksimal 3 file gambar yang dapat diunggah.');
+        break;
+      }
+      await handleMediaUpload(file);
+    }
   }
 });
 
@@ -467,15 +506,88 @@ mediaDropZone.addEventListener('dragleave', () => {
   mediaDropZone.style.borderColor = 'var(--border-card)';
 });
 
-mediaDropZone.addEventListener('drop', (e) => {
+mediaDropZone.addEventListener('drop', async (e) => {
   e.preventDefault();
   mediaDropZone.style.borderColor = 'var(--border-card)';
   if (e.dataTransfer.files.length > 0) {
-    handleMediaUpload(e.dataTransfer.files[0]);
+    const files = Array.from(e.dataTransfer.files);
+    for (const file of files) {
+      if (uploadedMediaFiles.length >= 3) {
+        alert('Maksimal 3 file gambar yang dapat diunggah.');
+        break;
+      }
+      await handleMediaUpload(file);
+    }
   }
 });
 
+function renderUploadedMedia() {
+  if (uploadedMediaFiles.length === 0) {
+    mediaUploadFeedback.style.display = 'none';
+    mediaDropZone.style.display = 'block';
+    return;
+  }
+
+  mediaUploadFeedback.innerHTML = '';
+  uploadedMediaFiles.forEach((file, index) => {
+    const item = document.createElement('div');
+    item.style.display = 'flex';
+    item.style.justifyContent = 'space-between';
+    item.style.alignItems = 'center';
+    item.style.padding = '4px 0';
+    item.style.borderBottom = index < uploadedMediaFiles.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none';
+    item.innerHTML = `
+      <span>
+        <i class="fa-solid fa-circle-check" style="color: var(--color-primary); margin-right: 5px;"></i>
+        Terlampir: <strong>${file.originalName}</strong>
+      </span>
+      <button type="button" class="btn-remove-media-item" data-index="${index}" style="background: transparent; border: none; color: var(--color-danger); cursor: pointer; font-size: 0.8rem;">
+        <i class="fa-solid fa-times"></i> Hapus
+      </button>
+    `;
+    mediaUploadFeedback.appendChild(item);
+  });
+
+  // Attach event listener for delete buttons
+  mediaUploadFeedback.querySelectorAll('.btn-remove-media-item').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const index = parseInt(btn.getAttribute('data-index'));
+      const removedFile = uploadedMediaFiles[index];
+      uploadedMediaFiles.splice(index, 1);
+      renderUploadedMedia();
+      addLogLine('info', `Lampiran media dihapus: ${removedFile.originalName}`);
+      mediaFileInput.value = ''; // Reset file input
+
+      try {
+        await fetch('/api/delete-media', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ filePath: removedFile.filePath })
+        });
+      } catch (err) {
+        console.error('Failed to delete media file from server:', err);
+      }
+    });
+  });
+
+  mediaUploadFeedback.style.display = 'flex';
+
+  if (uploadedMediaFiles.length >= 3) {
+    mediaDropZone.style.display = 'none';
+  } else {
+    mediaDropZone.style.display = 'block';
+  }
+}
+
 async function handleMediaUpload(file) {
+  // Check if file is image
+  if (!file.type.startsWith('image/')) {
+    alert(`File ${file.name} bukan file gambar.`);
+    return;
+  }
+
   const formData = new FormData();
   formData.append('file', file);
 
@@ -486,15 +598,13 @@ async function handleMediaUpload(file) {
     });
     const data = await res.json();
     if (data.success) {
-      uploadedMedia = {
+      uploadedMediaFiles.push({
         filePath: data.filePath,
         originalName: data.originalName,
         mimeType: data.mimeType
-      };
-      attachedMediaName.innerText = file.name;
-      mediaUploadFeedback.style.display = 'block';
-      mediaDropZone.style.display = 'none';
-      addLogLine('success', `File media dilampirkan: ${file.name}`);
+      });
+      renderUploadedMedia();
+      addLogLine('success', `Gambar dilampirkan: ${file.name}`);
     } else {
       alert('Gagal mengunggah media: ' + data.error);
     }
@@ -503,14 +613,6 @@ async function handleMediaUpload(file) {
     alert('Terjadi kesalahan saat melampirkan media.');
   }
 }
-
-btnRemoveMedia.addEventListener('click', () => {
-  uploadedMedia = null;
-  mediaFileInput.value = '';
-  mediaUploadFeedback.style.display = 'none';
-  mediaDropZone.style.display = 'block';
-  addLogLine('info', 'Lampiran media dihapus.');
-});
 
 // 4. Campaign Actions
 btnStartCampaign.addEventListener('click', async () => {
@@ -538,9 +640,9 @@ btnStartCampaign.addEventListener('click', async () => {
       textTemplate: template,
       textFileName: templateNameInput.value.trim() || 'web-campaign',
       numberFileName: uploadName,
-      mediaPath: uploadedMedia ? uploadedMedia.filePath : null,
-      mediaName: uploadedMedia ? uploadedMedia.originalName : null,
-      mediaType: uploadedMedia ? uploadedMedia.mimeType : null
+      mediaPath: uploadedMediaFiles.length > 0 ? JSON.stringify(uploadedMediaFiles.map(f => f.filePath)) : null,
+      mediaName: uploadedMediaFiles.length > 0 ? JSON.stringify(uploadedMediaFiles.map(f => f.originalName)) : null,
+      mediaType: uploadedMediaFiles.length > 0 ? JSON.stringify(uploadedMediaFiles.map(f => f.mimeType)) : null
     },
     options: {
       delayMin: delayMinVal,
@@ -594,7 +696,7 @@ btnCancelCampaign.addEventListener('click', () => {
 });
 
 btnDisconnect.addEventListener('click', async () => {
-  if (confirm('Apakah Anda yakin ingin memutuskan sesi WhatsApp ini?')) {
+  if (confirm('Apakah Anda yakin ingin memutuskan sesi WhatsApp ini? Seluruh riwayat laporan dan data kampanye lama juga akan dihapus.')) {
     statusDot.className = 'status-dot dot-connecting';
     statusText.innerText = 'Disconnecting...';
     headerStatusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Disconnecting...';
@@ -607,6 +709,24 @@ btnDisconnect.addEventListener('click', async () => {
 
     try {
       await fetch('/api/disconnect', { method: 'POST' });
+      
+      // Reset local frontend state
+      rawWAData = [];
+      phonebookData = [];
+      selectedChats.clear();
+      chkSelectAllChats.checked = false;
+      renderWAConversations();
+      
+      // Clear chart and logs
+      ackStats = { sent: 0, delivered: 0, read: 0 };
+      updateAckUI();
+      initChart();
+      terminalLogs.innerHTML = '';
+      
+      // Reload lists (reports and templates)
+      loadTemplates();
+      loadReports();
+      addLogLine('success', 'Sesi WhatsApp berhasil diputuskan. Seluruh riwayat laporan dan data kampanye lama telah dihapus.');
     } catch (err) {
       console.error('Error disconnecting:', err);
     }
@@ -1284,36 +1404,25 @@ socket.on('chats_resolved', (updates) => {
     if (updates[origJid]) {
       chat.id = updates[origJid].targetJid;
       chat.displayId = updates[origJid].displayId;
+      
+      const cleanOrigId = origJid.split('@')[0];
+      if (!chat.name || chat.name === cleanOrigId) {
+        chat.name = updates[origJid].name || updates[origJid].displayId;
+      }
     }
   });
 
-  // Dynamically update the DOM elements currently on screen
+  // Dynamically update the mapping for already selected chats
   Object.keys(updates).forEach(lidJid => {
     const data = updates[lidJid];
-    const checkboxes = document.querySelectorAll(`.wa-chat-checkbox[data-id="${lidJid}"]`);
-    checkboxes.forEach(checkbox => {
-      checkbox.setAttribute('data-id', data.targetJid);
-      
-      const parentRow = checkbox.closest('.wa-chat-item');
-      if (parentRow) {
-        const detailsDiv = parentRow.querySelector('.wa-chat-details');
-        if (detailsDiv) {
-          detailsDiv.innerText = data.displayId;
-        }
-        
-        const nameDiv = parentRow.querySelector('.wa-chat-name');
-        if (nameDiv && nameDiv.innerText === lidJid.split('@')[0]) {
-          nameDiv.innerText = nameDiv.title || data.displayId;
-        }
-      }
-    });
-
     if (selectedChats.has(lidJid)) {
       selectedChats.delete(lidJid);
       selectedChats.add(data.targetJid);
     }
   });
 
+  // Re-render everything to update badges, checkboxes, event listeners, and styles
+  renderWAConversations();
   updateCampaignButtonForWA();
 });
 

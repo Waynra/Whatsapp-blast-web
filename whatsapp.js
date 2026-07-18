@@ -1,10 +1,26 @@
 const EventEmitter = require('events');
+const fs = require('fs');
+const puppeteerExtra = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteerExtra.use(StealthPlugin());
+
+// Override require('puppeteer') cache for whatsapp-web.js to use stealth plugin
+require.cache[require.resolve('puppeteer')] = {
+  exports: puppeteerExtra
+};
+
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const config = require('./config');
 const logger = require('./logger');
 const { formatPhoneNumber, isValidPhoneNumber, sleep } = require('./utils');
 const db = require('./db');
+
+// Resolve standard Google Chrome path on Windows to bypass anti-bot and codec checks
+function getChromePath() {
+  const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+  return fs.existsSync(chromePath) ? chromePath : undefined;
+}
 
 class WhatsAppClient extends EventEmitter {
   constructor() {
@@ -26,11 +42,14 @@ class WhatsAppClient extends EventEmitter {
       }),
       webVersionCache: {
         type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html',
+        remotePath: 'https://cdn.jsdelivr.net/gh/wppconnect-team/wa-version@main/html/{version}.html',
         strict: false
       },
+      userAgent: false,
       puppeteer: {
         headless: config.whatsapp.headlessMode,
+        executablePath: getChromePath(),
+        protocolTimeout: 300000, // 5 minutes timeout to prevent disconnects on large payloads
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -38,7 +57,12 @@ class WhatsAppClient extends EventEmitter {
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--no-zygote',
-          '--disable-gpu'
+          '--disable-gpu',
+          '--disable-extensions',
+          '--disable-default-apps',
+          '--no-default-browser-check',
+          '--proxy-server=direct://',
+          '--proxy-bypass-list=*'
         ]
       }
     });
@@ -75,13 +99,18 @@ class WhatsAppClient extends EventEmitter {
 
     this.client.on('disconnected', (reason) => {
       this.isReady = false;
-      logger.warn('Client disconnected:', reason);
+      logger.warn(`Client disconnected: ${reason ? (typeof reason === 'object' ? JSON.stringify(reason) : String(reason)) : 'No reason provided'}`);
       this.emit('disconnected', reason);
     });
 
     this.client.on('change_state', (state) => {
       logger.debug('State changed:', state);
       this.emit('change_state', state);
+    });
+
+    this.client.on('loading_screen', (percent, message) => {
+      logger.info(`WhatsApp Loading: ${percent}% - ${message}`);
+      this.emit('loading_screen', { percent, message });
     });
 
     this.client.on('message_ack', (msg, ack) => {

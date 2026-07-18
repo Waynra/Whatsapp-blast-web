@@ -9,6 +9,8 @@ const clientInfo = document.getElementById('clientInfo');
 const clientName = document.getElementById('clientName');
 const clientPhone = document.getElementById('clientPhone');
 const btnDisconnect = document.getElementById('btnDisconnect');
+const btnResetSession = document.getElementById('btnResetSession');
+const connectionResetZone = document.getElementById('connectionResetZone');
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 const themeToggleIcon = document.getElementById('themeToggleIcon');
 
@@ -196,6 +198,21 @@ function updateStatusUI(status) {
       headerStatusBadge.innerHTML = '<i class="fa-solid fa-qrcode"></i> Scan QR';
       authSection.style.display = 'block';
       campaignSection.style.display = 'none';
+      if (connectionResetZone) connectionResetZone.style.display = 'none';
+    } else if (status.state === 'authenticated') {
+      statusDot.classList.add('dot-connecting');
+      statusText.innerText = 'Connecting...';
+      headerStatusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing';
+      authSection.style.display = 'block';
+      campaignSection.style.display = 'none';
+      qrPlaceholder.style.display = 'flex';
+      qrPlaceholder.innerHTML = `
+        <i class="fa-solid fa-spinner fa-spin spinner-icon"></i>
+        <p>Autentikasi Berhasil. Menghubungkan & sinkronisasi chat...</p>
+        <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">Jika proses ini stuck lebih dari 2 menit, silakan klik tombol <strong>Reset Sesi</strong> di kiri bawah.</p>
+      `;
+      qrcodeContainer.innerHTML = '';
+      if (connectionResetZone) connectionResetZone.style.display = 'block';
     } else if (status.state === 'initializing') {
       statusDot.classList.add('dot-connecting');
       statusText.innerText = 'Initializing...';
@@ -203,13 +220,19 @@ function updateStatusUI(status) {
       authSection.style.display = 'block';
       campaignSection.style.display = 'none';
       qrPlaceholder.style.display = 'flex';
+      qrPlaceholder.innerHTML = `
+        <i class="fa-solid fa-spinner fa-spin spinner-icon"></i>
+        <p>Menunggu QR Code dari server...</p>
+      `;
       qrcodeContainer.innerHTML = '';
+      if (connectionResetZone) connectionResetZone.style.display = 'block';
     } else {
       statusDot.classList.add('dot-disconnected');
       statusText.innerText = 'Disconnected';
       headerStatusBadge.innerHTML = '<i class="fa-solid fa-circle-nodes"></i> Offline';
       authSection.style.display = 'block';
       campaignSection.style.display = 'none';
+      if (connectionResetZone) connectionResetZone.style.display = 'block';
     }
   }
 }
@@ -488,8 +511,8 @@ mediaFileInput.addEventListener('change', async (e) => {
   if (e.target.files.length > 0) {
     const files = Array.from(e.target.files);
     for (const file of files) {
-      if (uploadedMediaFiles.length >= 3) {
-        alert('Maksimal 3 file gambar yang dapat diunggah.');
+      if (uploadedMediaFiles.length >= 10) {
+        alert('Maksimal 10 file gambar yang dapat diunggah.');
         break;
       }
       await handleMediaUpload(file);
@@ -512,8 +535,8 @@ mediaDropZone.addEventListener('drop', async (e) => {
   if (e.dataTransfer.files.length > 0) {
     const files = Array.from(e.dataTransfer.files);
     for (const file of files) {
-      if (uploadedMediaFiles.length >= 3) {
-        alert('Maksimal 3 file gambar yang dapat diunggah.');
+      if (uploadedMediaFiles.length >= 10) {
+        alert('Maksimal 10 file gambar yang dapat diunggah.');
         break;
       }
       await handleMediaUpload(file);
@@ -574,7 +597,7 @@ function renderUploadedMedia() {
 
   mediaUploadFeedback.style.display = 'flex';
 
-  if (uploadedMediaFiles.length >= 3) {
+  if (uploadedMediaFiles.length >= 10) {
     mediaDropZone.style.display = 'none';
   } else {
     mediaDropZone.style.display = 'block';
@@ -732,6 +755,47 @@ btnDisconnect.addEventListener('click', async () => {
     }
   }
 });
+
+if (btnResetSession) {
+  btnResetSession.addEventListener('click', async () => {
+    if (confirm('Apakah Anda yakin ingin mereset sesi WhatsApp ini? File sesi lama akan dihapus dan Anda harus memindai (scan) ulang kode QR baru.')) {
+      statusDot.className = 'status-dot dot-connecting';
+      statusText.innerText = 'Resetting...';
+      headerStatusBadge.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Resetting...';
+      
+      if (connectionResetZone) connectionResetZone.style.display = 'none';
+      
+      authSection.style.display = 'block';
+      campaignSection.style.display = 'none';
+      qrPlaceholder.style.display = 'flex';
+      qrcodeContainer.innerHTML = '';
+      
+      try {
+        await fetch('/api/disconnect', { method: 'POST' });
+        
+        // Reset local frontend state
+        rawWAData = [];
+        phonebookData = [];
+        selectedChats.clear();
+        chkSelectAllChats.checked = false;
+        renderWAConversations();
+        
+        // Clear chart and logs
+        ackStats = { sent: 0, delivered: 0, read: 0 };
+        updateAckUI();
+        initChart();
+        terminalLogs.innerHTML = '';
+        
+        // Reload lists (reports and templates)
+        loadTemplates();
+        loadReports();
+        addLogLine('success', 'Sesi WhatsApp berhasil direset. Silakan pindai ulang kode QR baru.');
+      } catch (err) {
+        console.error('Error resetting session:', err);
+      }
+    }
+  });
+}
 
 btnClearTerminal.addEventListener('click', () => {
   terminalLogs.innerHTML = '';

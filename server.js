@@ -7,16 +7,17 @@ const path = require('path');
 const fs = require('fs');
 const chalk = require('chalk');
 const xlsx = require('xlsx');
+const { Jimp } = require('jimp');
 
 const config = require('./config');
 const logger = require('./logger');
 
 // Prevent process crashes from unhandled rejections/exceptions (e.g., session folder locking during disconnect)
 process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at promise:', promise, 'reason:', reason);
+  logger.error(`Unhandled Rejection at promise: ${reason instanceof Error ? reason.stack : String(reason)}`);
 });
 process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception thrown:', error);
+  logger.error(`Uncaught Exception thrown: ${error instanceof Error ? error.stack : String(error)}`);
 });
 
 const WhatsAppClient = require('./whatsapp');
@@ -433,15 +434,39 @@ app.post('/api/upload-contacts', upload.single('file'), (req, res) => {
 });
 
 // Upload media attachment file
-app.post('/api/upload-media', mediaUpload.single('file'), (req, res) => {
+app.post('/api/upload-media', mediaUpload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No media file uploaded' });
   }
+
+  const filePath = req.file.path;
+  const mimeType = req.file.mimetype;
+
+  // Auto-compress image to prevent Puppeteer memory crashes and speed up delivery
+  if (mimeType && mimeType.startsWith('image/')) {
+    try {
+      logger.info(`Compressing uploaded image: ${req.file.originalname}`);
+      const image = await Jimp.read(filePath);
+      
+      // Resize to a maximum width of 1200px (preserve aspect ratio)
+      if (image.width > 1200) {
+        image.resize({ w: 1200 });
+      }
+      
+      // Compress quality to 80% and save back to disk
+      const buffer = await image.getBuffer(mimeType, { quality: 80 });
+      fs.writeFileSync(filePath, buffer);
+      logger.info(`Image compressed successfully: ${req.file.originalname}`);
+    } catch (err) {
+      logger.warn(`Could not compress image ${req.file.originalname}, using original: ${err.message}`);
+    }
+  }
+
   res.json({
     success: true,
-    filePath: req.file.path,
+    filePath: filePath,
     originalName: req.file.originalname,
-    mimeType: req.file.mimetype
+    mimeType: mimeType
   });
 });
 

@@ -38,6 +38,11 @@
             <i class="fa-solid fa-sign-out-alt"></i> Disconnect
           </button>
         </div>
+        <div id="connectionResetZone" style="display: none; margin-top: 10px; width: 100%;">
+          <button class="btn btn-warning btn-sm" id="btnResetSession" style="width: 100%; font-size: 0.8rem; padding: 6px 10px; border-radius: var(--radius-sm);">
+            <i class="fa-solid fa-arrows-rotate"></i> Reset Sesi / Hapus Cache
+          </button>
+        </div>
       </div>
 
       <!-- Templates List -->
@@ -140,10 +145,10 @@ Gunakan variabel dinamis: {date}, {time}, {random_string}."></textarea>
 
             <!-- Upload Media Attachment -->
             <div class="form-group" style="margin-bottom: 20px;">
-              <label><i class="fa-solid fa-paperclip"></i> Lampiran Gambar (Opsional, Maks 3 Gambar)</label>
+              <label><i class="fa-solid fa-paperclip"></i> Lampiran Gambar (Opsional, Maks 10 Gambar)</label>
               <div class="media-drop-zone" id="mediaDropZone" style="border: 2px dashed var(--border-card); padding: 15px; border-radius: var(--radius-md); text-align: center; cursor: pointer; transition: var(--transition); background: rgba(255, 255, 255, 0.02);">
                 <i class="fa-solid fa-file-image" style="font-size: 1.8rem; color: var(--text-muted); margin-bottom: 8px;"></i>
-                <p style="font-size: 0.85rem; color: var(--text-muted);">Klik/Seret file gambar di sini (bisa pilih hingga 3 gambar)</p>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">Klik/Seret file gambar di sini (bisa pilih hingga 10 gambar)</p>
                 <input type="file" id="mediaFileInput" accept="image/*" style="display: none;" multiple>
               </div>
               <div id="mediaUploadFeedback" class="upload-feedback" style="display: none; margin-top: 8px; font-size: 0.85rem; padding: 8px 12px; border-radius: var(--radius-sm); background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.2); flex-direction: column; gap: 8px;">

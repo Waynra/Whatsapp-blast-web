@@ -114,6 +114,22 @@ class WebBlastManager {
           await sleep(1000);
         }
 
+        // Check if WhatsApp client disconnected
+        if (!this.client.isReady) {
+          logger.warn(`Campaign ID ${campaignId} paused: WhatsApp client is disconnected`);
+          this.io.emit('campaign_log', { 
+            type: 'warn', 
+            message: 'Koneksi WhatsApp terputus. Kampanye dijeda secara otomatis. Hubungkan kembali WhatsApp Anda lalu tekan Resume.' 
+          });
+          this.isPaused = true;
+          this.io.emit('campaign_status', { status: 'paused' });
+          
+          // Wait for pause to be resolved by user resuming
+          while (this.isPaused) {
+            await sleep(1000);
+          }
+        }
+
         // Handle Cancel
         if (this.isCancelled) {
           logger.info(`Campaign ID ${campaignId} execution cancelled by user`);
